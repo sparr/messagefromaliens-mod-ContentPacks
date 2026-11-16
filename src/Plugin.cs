@@ -19,11 +19,14 @@ namespace ContentPacks
 
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> DumpGameText;
+        internal static ConfigEntry<bool> LoadContentPacks;
 
         private void Awake()
         {
             Log = Logger;
 
+            LoadContentPacks = Config.Bind("Content", "LoadContentPacks", true,
+                Described("Load text files from content packs in BepInEx/content/<pack>/TxtData/. Takes effect at the next launch.", "message de group"));
             DumpGameText = Config.Bind("Content", "DumpGameText", false,
                 Described("Write the game's decrypted text files to BepInEx/content/_dump/TxtData/ at startup.", "write game de message"));
 
