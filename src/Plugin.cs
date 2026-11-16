@@ -37,6 +37,10 @@ namespace ContentPacks
             Log.LogInfo($"{Name} {Version} loaded");
         }
 
+        // Plugin objects must not start work from Awake, which runs during Application's static
+        // constructor. Update is safe.
+        private void Update() => GlyphRenderer.Tick();
+
         // Mod Settings shows a setting tagged with its name in glyphs, as game word IDs.
         private static ConfigDescription Described(string description, string glyphs) =>
             new ConfigDescription(description, null, new Dictionary<string, string> { ["MessageFromAliens.Label"] = glyphs });

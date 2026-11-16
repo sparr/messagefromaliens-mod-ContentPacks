@@ -38,6 +38,7 @@ namespace ContentPacks
                 }
                 if (Plugin.LoadContentPacks.Value)
                 {
+                    textfiles.TryGetValue(WordTableMerge.Target, out GlyphRenderer.OriginalTable);
                     Apply(textfiles);
                 }
             }
