@@ -20,6 +20,7 @@ namespace ContentPacks
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> DumpGameText;
         internal static ConfigEntry<bool> LoadContentPacks;
+        internal static ConfigEntry<bool> EnforcePatchContext;
 
         private void Awake()
         {
@@ -29,6 +30,8 @@ namespace ContentPacks
                 Described("Load text files from content packs in BepInEx/content/<pack>/TxtData/. Takes effect at the next launch.", "message de group"));
             DumpGameText = Config.Bind("Content", "DumpGameText", false,
                 Described("Write the game's decrypted text files to BepInEx/content/_dump/TxtData/ at startup.", "write game de message"));
+            EnforcePatchContext = Config.Bind("Content", "EnforcePatchContext", false,
+                Described("Place each patch hunk only where all its context lines match. When off, a hunk that changes lines is placed by its removed lines alone, and its context only chooses between several matches. Takes effect at the next launch.", "near wordline can same"));
 
             new Harmony(Guid).PatchAll(typeof(Plugin).Assembly);
             Log.LogInfo($"{Name} {Version} loaded");

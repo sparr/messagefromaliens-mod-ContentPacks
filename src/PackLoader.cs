@@ -74,6 +74,8 @@ namespace ContentPacks
                 .Where(p => p != null)
                 .ToList();
 
+            // Every replacement first, then every patch, so a pack's patches see the files as all
+            // packs' replacements left them.
             var categories = Global.alien_message_category;
             foreach (var pack in packs)
             {
@@ -99,16 +101,42 @@ namespace ContentPacks
                     }
                 }
             }
+            foreach (var pack in packs)
+            {
+                foreach (var (key, file) in pack.Patches)
+                {
+                    var label = $"[{pack.Name}] {Path.GetFileName(file)}";
+                    try
+                    {
+                        if (!textfiles.TryGetValue(key, out var text))
+                        {
+                            Log.Error($"{label}: skipped, because no game file or pack file is named {key}");
+                            continue;
+                        }
+                        var patched = TextPatcher.Apply(text, File.ReadAllText(file), label, Plugin.EnforcePatchContext.Value);
+                        if (patched != null)
+                        {
+                            textfiles[key] = patched;
+                            Log.Info($"{label}: patched {key}");
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Log.Error($"{label}: skipped, because of an error: {e.Message}");
+                    }
+                }
+            }
         }
 
         private sealed class Pack
         {
             public string Name;
             public readonly List<(string Key, string File)> Replacements = new List<(string, string)>();
+            public readonly List<(string Key, string File)> Patches = new List<(string, string)>();
         }
 
-        // Sorts a pack's TxtData files by ending. The target file is the name up to the first dot,
-        // and <name>.txt replaces it.
+        // Sorts a pack's TxtData files by ending. The target file is the name up to the first dot.
+        // <name>.txt replaces it, and <name>.patch patches it.
         private static Pack Classify(string dir)
         {
             try
@@ -140,9 +168,13 @@ namespace ContentPacks
                 {
                     pack.Replacements.Add((key, file));
                 }
+                else if (ending == ".patch")
+                {
+                    pack.Patches.Add((key, file));
+                }
                 else
                 {
-                    Log.Warning($"[{pack.Name}] {name}: skipped; pack files end in .txt");
+                    Log.Warning($"[{pack.Name}] {name}: skipped; pack files end in .txt or .patch");
                 }
             }
             return pack;

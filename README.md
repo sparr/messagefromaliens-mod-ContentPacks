@@ -17,14 +17,17 @@ A file's name, up to the first dot, names a game message category (or other reso
 | File | Effect |
 |---|---|
 | `<name>.txt` | Replaces `<name>` if it already exists. Otherwise, adds a new message category with that name. |
+| `<name>.patch` | Applies a unified diff to the file. See [Text patches](#text-patches). |
 
 Any other file is skipped with a warning.
 
-Packs apply in order of their folder (pack) names, and later packs override earlier ones. Within a pack, files apply in name order.
+Every replacement in every pack applies first, then every patch. So a patch sees the files as all packs' replacements left them.
+
+Within each of those steps, packs apply in order of their folder (pack) names, and later packs override earlier ones. Within a pack, files apply in name order.
 
 Folders whose names start with `_` are skipped. This includes the `_dump` folder created by [`DumpGameText`](#configuration).
 
-Problems are logged with the pack and file, and loading continues without the part that failed.
+Problems are logged with the pack, file, and line, and loading continues without the part that failed.
 
 To get the original files as a starting point, enable [`DumpGameText`](#configuration). The files are written to `BepInEx/content/_dump/TxtData/`.
 
@@ -32,7 +35,7 @@ The `14mv` data used by `MV` is loaded directly from `Resources` and cannot be o
 
 ### New pages
 
-A new `.txt` file adds a message category, a set of pages. The name is arbitrary. A page can be any of three kinds: an ordinary page of text, a quiz, or a menu linking to other pages. A chapter is a menu.
+A new `.txt` file adds a message category, a set of pages. The name is arbitrary, only relevant to future patches that modify it. A page can be any of three kinds: an ordinary page of text, a quiz, or a menu linking to other pages. A chapter is a menu.
 
 #### Page text
 
@@ -60,7 +63,7 @@ Every quiz title in the game has the form `<words> riddle <n>`: `riddle` is the 
 
 A page whose text contains a `[` is a menu. Each of its lines links to the page whose title is that line's words, leaving out tokens starting with `[`. An empty `[]` token makes a page a menu without affecting any line.
 
-A new page can only be reached through a menu, so a pack has to change a menu to link to it.
+A new page can only be reached through a menu. To show a page, patch a line naming it into an existing menu.
 
 #### Gates
 
@@ -96,6 +99,10 @@ A chapter is a menu of lessons and quizzes, usually linked from one of the game'
 
 New chapters can't award achievements.
 
+### Text patches
+
+A `.patch` file is a unified diff of one file, as made by `diff -u` or `git diff`. Its file names are not used. Hunks apply in order, each to the result of the ones before it. If any hunk fails, the whole patch is skipped. Hunk line numbers are never enforced, and context lines are only enforced if [`EnforcePatchContext`](#configuration) is enabled or the hunk only adds lines with no removals. When a hunk matches several places, a place where its context matches too wins first, then the one nearest its header's line number, then the one where the most context lines match.
+
 ## Patches
 
 | Method | Patch |
@@ -109,6 +116,7 @@ New chapters can't award achievements.
 | Key | Default | Effect |
 |---|---|---|
 | `Content.LoadContentPacks` | `true` | Load content packs from `BepInEx/content/`. Takes effect at the next launch. |
+| `Content.EnforcePatchContext` | `false` | Place each patch hunk only where all its context lines match. When off, a hunk that changes lines is placed by its removed lines alone. Takes effect at the next launch. |
 | `Content.DumpGameText` | `false` | Write the stock game text files to `BepInEx/content/_dump/TxtData/` at startup. |
 
 Each setting is tagged with its name in glyphs, and the mod names itself in glyphs, so Mod Settings can show them in the game.
