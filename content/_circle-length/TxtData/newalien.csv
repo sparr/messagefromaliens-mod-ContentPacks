@@ -1,0 +1,6 @@
+# New words: a basic glyph, a compound that uses it, and a scratch word that
+# newalien.remove.csv removes again.
+word,meaning,wordtype,struct,component1,component2,modifier
+diameter,diameter equal radius multiply 2,noun,s,-1 -2 1 -2 2 -1 2 1 1 2 -1 2 -2 1 -2 -1 -1 -2;-2 0 2 0,,
+circumference,circumference equal diameter multiply pi,noun,lr,diameter,pi,
+scratch,,noun,s,-1 -1 1 1,,

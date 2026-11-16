@@ -1,0 +1,7 @@
+#diameter
+diameter equal 2 multiply radius
+radius equal diameter divide 2
+#circumference
+circumference be circle shape length
+diameter equal radius multiply 2
+circumference equal pi multiply diameter

@@ -4,7 +4,7 @@ A [BepInEx 5](https://github.com/BepInEx/BepInEx) plugin for [Message From Alien
 
 ## Installing
 
-Install BepInEx first, if you haven't already, as described under [Requirements](#requirements). Then unzip the release zip into the game folder, the one that holds `MessageFromAliens.exe`. In Steam, right-click the game and choose Manage, then Browse local files, to open it. The zip holds `BepInEx/plugins/ContentPacks/`, so the mod lands in BepInEx's plugins folder. To update, unzip a newer release over it. To uninstall, delete `BepInEx/plugins/ContentPacks/`.
+Install BepInEx first, if you haven't already, as described under [Requirements](#requirements). Then unzip the release zip into the game folder, the one that holds `MessageFromAliens.exe`. In Steam, right-click the game and choose Manage, then Browse local files, to open it. The zip holds `BepInEx/plugins/ContentPacks/`, so the mod lands in BepInEx's plugins folder, and the example pack in `BepInEx/content/_circle-length/`. To update, unzip a newer release over it. To uninstall, delete `BepInEx/plugins/ContentPacks/` and `BepInEx/content/_circle-length/`.
 
 ## Content packs
 
@@ -33,6 +33,8 @@ Problems are logged with the pack, file, and line, and loading continues without
 To get the original files as a starting point, enable [`DumpGameText`](#configuration). The files are written to `BepInEx/content/_dump/TxtData/`.
 
 The `14mv` data used by `MV` is loaded directly from `Resources` and cannot be overridden by content packs.
+
+Content Packs comes with a small example pack in `BepInEx/content/_circle-length/`. It's skipped until you rename its folder without the `_`. See [its README](content/_circle-length/README.md).
 
 ### New pages
 
@@ -64,7 +66,7 @@ Every quiz title in the game has the form `<words> riddle <n>`: `riddle` is the 
 
 A page whose text contains a `[` is a menu. Each of its lines links to the page whose title is that line's words, leaving out tokens starting with `[`. An empty `[]` token makes a page a menu without affecting any line.
 
-A new page can only be reached through a menu. To show a page, patch a line naming it into an existing menu.
+A new page can only be reached through a menu. To show a page, patch a line naming it into an existing menu. The example pack adds its pages to chapter 1's menu.
 
 #### Gates
 
@@ -257,7 +259,7 @@ Each setting is tagged with its name in glyphs, and the mod names itself in glyp
 dotnet build -c Release
 ```
 
-The build copies `ContentPacks.dll` to `<game>/BepInEx/plugins/ContentPacks/`. Disable the copy with `-p:DeployToGame=false`.
+The build copies `ContentPacks.dll` to `<game>/BepInEx/plugins/ContentPacks/`, and the example pack from [`content/_circle-length/`](content/_circle-length/) to `<game>/BepInEx/content/_circle-length/`. Disable the copy with `-p:DeployToGame=false`.
 
 The build looks for the game in `<SteamLibraryDir>/steamapps/common/Message From Aliens`. `SteamLibraryDir` comes from the first of these that is set:
 

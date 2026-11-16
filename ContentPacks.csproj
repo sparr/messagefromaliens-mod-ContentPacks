@@ -44,6 +44,11 @@
   <Target Name="DeployPlugin" AfterTargets="Build" Condition="'$(DeployToGame)' == 'true'">
     <MakeDir Directories="$(PluginDeployDir)" />
     <Copy SourceFiles="$(TargetPath);$(TargetDir)$(TargetName).pdb" DestinationFolder="$(PluginDeployDir)" SkipUnchangedFiles="true" />
+    <!-- The example pack, which Content Packs skips until its folder is renamed without the _. -->
+    <ItemGroup>
+      <ExamplePackFiles Include="$(MSBuildThisFileDirectory)content/_circle-length/**" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ExamplePackFiles)" DestinationFiles="@(ExamplePackFiles->'$(GameDir)/BepInEx/content/_circle-length/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
 </Project>

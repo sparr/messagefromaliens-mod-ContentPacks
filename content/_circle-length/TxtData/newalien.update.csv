@@ -1,0 +1,5 @@
+# Changes only the definitions of two words: circumference, which an earlier
+# file added, and the game's own pi. Their other columns stay as they were.
+word,meaning
+circumference,circle de outline length;circumference equal pi multiply diameter
+pi,circumference divide diameter;pi be irrational and constant

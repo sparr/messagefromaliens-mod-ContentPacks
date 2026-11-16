@@ -1,0 +1,11 @@
+Adds two lines to the chapter 1 menu, linking to the example's two pages. The
+second starts with a gate, [diameter], so it appears only once the first
+page has been finished (which means read to the end for a normal page).
+The hunk only inserts, so it's placed by its one context line, which must match.
+Text before the first hunk, like this explanation, is ignored.
+--- a/math0.txt
++++ b/math0.txt
+@@ -5 +5,3 @@
+ arithmetic riddle 2
++diameter
++[diameter] circumference
