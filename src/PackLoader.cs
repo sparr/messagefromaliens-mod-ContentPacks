@@ -74,8 +74,8 @@ namespace ContentPacks
                 .Where(p => p != null)
                 .ToList();
 
-            // Every replacement first, then every patch, so a pack's patches see the files as all
-            // packs' replacements left them.
+            // Every replacement first, then every patch, then every merge, so a pack's patches and
+            // merges see the files as all packs' replacements left them.
             var categories = Global.alien_message_category;
             foreach (var pack in packs)
             {
@@ -126,6 +126,25 @@ namespace ContentPacks
                     }
                 }
             }
+            var merges = packs.SelectMany(p => p.Merges.Select(f => ($"[{p.Name}] {Path.GetFileName(f)}", f))).ToList();
+            if (merges.Count > 0)
+            {
+                if (textfiles.TryGetValue(WordTableMerge.Target, out var table))
+                {
+                    try
+                    {
+                        textfiles[WordTableMerge.Target] = WordTableMerge.Apply(table, merges, textfiles);
+                    }
+                    catch (Exception e)
+                    {
+                        Log.Error($"{WordTableMerge.Target}: merges skipped, because of an error: {e}");
+                    }
+                }
+                else
+                {
+                    Log.Error($"{WordTableMerge.Target}: merges skipped, because the game has no word table");
+                }
+            }
         }
 
         private sealed class Pack
@@ -133,10 +152,12 @@ namespace ContentPacks
             public string Name;
             public readonly List<(string Key, string File)> Replacements = new List<(string, string)>();
             public readonly List<(string Key, string File)> Patches = new List<(string, string)>();
+            public readonly List<string> Merges = new List<string>();
         }
 
         // Sorts a pack's TxtData files by ending. The target file is the name up to the first dot.
-        // <name>.txt replaces it, and <name>.patch patches it.
+        // <name>.txt replaces it, <name>.patch patches it, and the word table's merges are
+        // <table>.csv, applied first, then <table>.<anything>.csv in name order.
         private static Pack Classify(string dir)
         {
             try
@@ -158,6 +179,8 @@ namespace ContentPacks
             {
                 return pack;
             }
+            var mainMerge = WordTableMerge.Target + ".csv";
+            var named = new List<string>();
             foreach (var file in Directory.GetFiles(txtDir).OrderBy(f => f, StringComparer.Ordinal))
             {
                 var name = Path.GetFileName(file);
@@ -172,11 +195,27 @@ namespace ContentPacks
                 {
                     pack.Patches.Add((key, file));
                 }
+                else if (name.EndsWith(".csv", StringComparison.Ordinal))
+                {
+                    if (key != WordTableMerge.Target)
+                    {
+                        Log.Error($"[{pack.Name}] {name}: skipped, because only the word table, {WordTableMerge.Target}, takes .csv merges");
+                    }
+                    else if (name == mainMerge)
+                    {
+                        pack.Merges.Insert(0, file);
+                    }
+                    else
+                    {
+                        named.Add(file);
+                    }
+                }
                 else
                 {
-                    Log.Warning($"[{pack.Name}] {name}: skipped; pack files end in .txt or .patch");
+                    Log.Warning($"[{pack.Name}] {name}: skipped; pack files end in .txt, .patch, or .csv");
                 }
             }
+            pack.Merges.AddRange(named);
             return pack;
         }
     }

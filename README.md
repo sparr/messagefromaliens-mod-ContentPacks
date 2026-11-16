@@ -18,12 +18,13 @@ A file's name, up to the first dot, names a game message category (or other reso
 |---|---|
 | `<name>.txt` | Replaces `<name>` if it already exists. Otherwise, adds a new message category with that name. |
 | `<name>.patch` | Applies a unified diff to the file. See [Text patches](#text-patches). |
+| `newalien.csv`, `newalien.<anything>.csv` | Merges rows into the word table. See [Word table merges](#word-table-merges). |
 
 Any other file is skipped with a warning.
 
-Every replacement in every pack applies first, then every patch. So a patch sees the files as all packs' replacements left them.
+Every replacement in every pack applies first, then every patch, then every merge. So a patch or merge sees the files as all packs' replacements left them.
 
-Within each of those steps, packs apply in order of their folder (pack) names, and later packs override earlier ones. Within a pack, files apply in name order.
+Within each of those steps, packs apply in order of their folder (pack) names, and later packs override earlier ones. Within a pack, files apply in name order, except that `newalien.csv` comes before the pack's other `newalien.foo.csv` files.
 
 Folders whose names start with `_` are skipped. This includes the `_dump` folder created by [`DumpGameText`](#configuration).
 
@@ -47,7 +48,7 @@ A new `.txt` file adds a message category, a set of pages. The name is arbitrary
 
 - A line starting with `#` begins a page, and its words are the page's title. Pages are found by title, so a title must be unique across all files.
 - Each following line, up to the next `#`, is one sentence: word IDs separated by spaces, drawn as glyphs. Long lines wrap automatically in-game; don't wrap them in the file.
-- Tokens starting with `(` or `[` aren't drawn. Number tokens like `5e2` are drawn as numbers.
+- Tokens starting with `(` or `[` aren't drawn. Number tokens like `5e2` are drawn as numbers. See [Numbers](#numbers).
 
 #### Quizzes
 
@@ -102,6 +103,115 @@ New chapters can't award achievements.
 ### Text patches
 
 A `.patch` file is a unified diff of one file, as made by `diff -u` or `git diff`. Its file names are not used. Hunks apply in order, each to the result of the ones before it. If any hunk fails, the whole patch is skipped. Hunk line numbers are never enforced, and context lines are only enforced if [`EnforcePatchContext`](#configuration) is enabled or the hunk only adds lines with no removals. When a hunk matches several places, a place where its context matches too wins first, then the one nearest its header's line number, then the one where the most context lines match.
+
+### Word table merges
+
+The word table is a CSV file with one row per word. A `.csv` merge file changes rows by their word:
+
+```
+# A new basic glyph and a compound that uses it.
+word,meaning,wordtype,struct,component1,component2,modifier
+diameter,diameter equal radius multiply 2,noun,s,-1 -2 1 -2 2 -1 2 1 1 2 -1 2 -2 1 -2 -1 -1 -2;-2 0 2 0,,
+circumference,circumference equal diameter multiply pi,noun,lr,diameter,pi,
+```
+
+This adds two nouns. `diameter` is a basic glyph, an octagon with a line through it. `circumference` is that glyph beside the game's glyph for pi. The definitions and word type are the game's own word IDs.
+
+- The first line names the columns the file sets, using the names in the word table's own header row, case insensitive: `word`, `meaning`, `wordtype`, `redirect`, `struct`, `component1`, `component2`, `modifier`, and `rename`. Column order doesn't matter, except the first column must be `word`.
+- A row whose word exists overwrites the columns the file names and keeps the rest. A row with a new word adds it, with the other columns empty. A cell left empty sets that field to empty. To leave a field alone, leave its column out of the file. If different words have different column requirements, put them in separate files.
+- `!<word>` in the word column removes that row. A word that other rows use as a component, as a basic glyph's redirect, or as a number's digit can't be removed. Removing a word that the game's text still uses is logged as a warning.
+- Lines starting with `#` and blank lines are skipped. No cell can contain a comma.
+- The game removes every `:` from a row before reading it, so that fields like `1e1` can be stored as `:1e1` to prevent spreadsheet programs from mangling them. A `:` found not at the start of a word is logged as a warning.
+
+The `struct`, `component1`, `component2`, and `modifier` columns set the word's glyph. See [Glyph structure](#glyph-structure).
+
+After all merges, each added or changed row is checked. A row fails when:
+- it has no word type or no structure code, since the game stops loading on a word with no word type;
+- a component that must be a word names no word;
+- a basic glyph's strokes hold anything but numbers, or an empty or odd-length path;
+- its components lead back to the word itself;
+- a basic glyph's redirect names no word, since the game stops loading on one;
+- it's a number word whose name isn't a digit, `e`, and a place, like `5e2`, or whose digit names no word, since the game stops loading on one.
+
+A changed row that fails keeps its earlier definition, and a new row that fails is dropped. These checks are applied repeatedly, because one failed row could cause other rows to fail.
+
+The game draws glyphs on its pages from sprites made when it was built, so new words show its fallback image, and words whose shape changed keep their old one.
+
+#### Glyph structure
+
+A word's glyph comes from four columns of its row. `struct` is a code that says how the glyph is built. `component1` and `component2` hold its strokes or name its parts. `modifier` adjusts the layout. Parts are other words, so glyphs nest: the game builds each part's glyph first, then arranges the parts.
+
+##### Basic glyphs
+
+| Struct | Components |
+|---|---|
+| `s` | `component1` is the glyph's strokes. `component2` is empty. |
+| `solid` | same as `s` inside a compound glyph, otherwise ignored |
+
+Strokes are paths separated by `;`. Each path is a list of numbers read as x y pairs and drawn as straight lines from point to point, so a closed shape repeats its first point. x grows to the right and y grows upward. The game's glyphs keep to a half-unit grid, mostly within -3 to 3. The glyph is centered on its bounding box. Drawn alone, it's scaled down to fit its box if it's larger, as every glyph on that grid is. Inside other glyphs, parts are always rescaled, so only proportions matter there. An empty `component1` draws the game's default, a single diagonal stroke. Every glyph is drawn with the same line width, whatever its size.
+
+One game word uses `solid`, the notebook's cursor marker, which has a sprite that is usually never seen.
+
+##### One part
+
+These take one word in `component1` and leave `component2` empty, drawing one or more copies of `component1`'s glyph. Multiple copies and `shrink` are scaled to just under half size.
+
+| Struct | Arrangement |
+|---|---|
+| `d` | two copies side by side |
+| `vd` | two copies, one above the other |
+| `t` | three copies in a triangle, one on top |
+| `q` | four copies in a 2 by 2 grid |
+| `shrink` | one copy |
+| `flr` | mirrored left to right |
+| `fud` | mirrored top to bottom |
+| `fb` | turned 180 degrees |
+
+##### Two parts
+
+These take two words: `component1` is the first part and `component2` the second.
+
+| Struct | Arrangement |
+|---|---|
+| `lr` | first part on the left, second on the right |
+| `ud` | first part above the second |
+| `oi` | first part outside, second inside it, centered |
+| `our`, `oul`, `odr`, `odl` | second part in the upper right, upper left, lower right, or lower left corner of the first |
+| `ou`, `od`, `ol`, `or` | second part at the top, bottom, left, or right side of the first |
+| `over` | second part on top of the first, at full size |
+
+Before they're arranged, both parts are scaled so their longer side is the same length and centered on their bounding boxes. A part whose own modifier holds `!` isn't centered.
+
+- **Side by side or stacked** (`lr`, `ud`): the box is split between the parts along that direction, with a gap of 15% of the box. By default the split gives each part a share in proportion to its shape, so that both fill the box's full height (`lr`) or width (`ud`). A narrow part beside a wide one gets a narrow share.
+- **Outside and inside** (`oi`, the corners and sides, `over`): the first part fills the box. The second is scaled to half the box, centered (`oi`) or moved until it touches the named side or corner. `over` keeps it at full size.
+
+##### Numbers
+
+| Struct | Glyph |
+|---|---|
+| `exp` | a number glyph, built from the word itself |
+
+The plain digits are basic `s` glyphs. Number words of the form `<digit>e<place>` use the `exp` struct to indicate they are dynamically generated according to the number drawing rules and based on the basic digit glyph. The components are ignored.
+
+Adding `exp` words has no visible effect. The game already has an `exp` glyph for every digit from 1 to 6 at places 1 to 5 and -1 to -5, so a new one would be at place 6 or more, or -6 or less. Page text never shows those: the game writes a number at place 4 or more, or -4 or less, in scientific form, as digits, the `E` glyph, and an exponent, instead of drawing its glyph.
+
+##### Modifiers
+
+The `modifier` field is a string of characters, each setting one option. Most apply to two-part structures.
+
+| Modifier | Applies to | Effect | Game words using it |
+|---|---|---|---|
+| `=` | `lr`, `ud` | Split the box evenly, each part filling its half. | 195 |
+| `l` | `lr`, `ud` | Give the first part 65% of the box. | 24 |
+| `r` | `lr`, `ud` | Give the first part 35% of the box. | 14 |
+| `s` | `lr`, `ud` | Widen the gap to 30%. | 3 |
+| `z` | `lr`, `ud` | Narrow the gap to 10%. | 2 |
+| `n` | `lr`, `ud` | Narrow the gap to 5%. | 3 |
+| `+` | `o*` except `over` | Make the second part 70% of the box. | 70 |
+| `-` | `o*` except `over` | Make the second part 40% of the box. | 9 |
+| `x` | `o*` except `over` | Make the second part 25% of the box. | 7 |
+| `x` | all two-component structs | Move the second part down by 5% of the box. | 7 |
+| `!` | basic glyphs, components of two-part compounds | Don't center the glyph. | 3 |
 
 ## Patches
 
