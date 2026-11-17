@@ -28,6 +28,8 @@ Within each of those steps, packs apply in order of their folder (pack) names, a
 
 Folders whose names start with `_` are skipped. This includes the `_dump` folder created by [`DumpGameText`](#configuration).
 
+Each other pack gets a setting to turn it off. In Mod Settings, Content Packs' page has a line that opens a page of these settings, in loading order. A pack whose folder name is game words separated by hyphens, like `circle-length`, is labeled with those glyphs. Any other pack is labeled with its place in loading order, as a number. Packs are read as the game starts, so a change takes effect at the next launch. The settings are stored in the `Packs` section of the config file, one per folder name.
+
 Problems are logged with the pack, file, and line, and loading continues without the part that failed.
 
 To get the original files as a starting point, enable [`DumpGameText`](#configuration). The files are written to `BepInEx/content/_dump/TxtData/`.
@@ -244,6 +246,7 @@ A number word like `5e2` is drawn from its digit's glyph by name, not through it
 | `Content.LoadContentPacks` | `true` | Load content packs from `BepInEx/content/`. Takes effect at the next launch. |
 | `Content.EnforcePatchContext` | `false` | Place each patch hunk only where all its context lines match. When off, a hunk that changes lines is placed by its removed lines alone. Takes effect at the next launch. |
 | `Content.DumpGameText` | `false` | Write the stock game text files to `BepInEx/content/_dump/TxtData/` at startup. |
+| `Packs.<pack>` | `true` | Load the content pack in `BepInEx/content/<pack>/`. Added for each pack when it's found. Takes effect at the next launch. |
 
 Each setting is tagged with its name in glyphs, and the mod names itself in glyphs, so Mod Settings can show them in the game.
 

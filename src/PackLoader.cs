@@ -67,13 +67,28 @@ namespace ContentPacks
                 return;
             }
 
-            // Packs apply in ordinal name order; a later pack overrides an earlier one.
-            var packs = Directory.GetDirectories(ContentRoot)
+            // Packs apply in ordinal name order; a later pack overrides an earlier one. Each has a
+            // setting to turn it off, labeled with its name in glyphs when its name is game words.
+            var dirs = Directory.GetDirectories(ContentRoot)
                 .Where(d => !Path.GetFileName(d).StartsWith("_"))
                 .OrderBy(d => Path.GetFileName(d), StringComparer.Ordinal)
-                .Select(Classify)
-                .Where(p => p != null)
                 .ToList();
+            var words = GameWords(textfiles);
+            var packs = new List<Pack>();
+            for (var i = 0; i < dirs.Count; i++)
+            {
+                var name = Path.GetFileName(dirs[i]);
+                if (!PackToggles.Enabled(name, i + 1, words))
+                {
+                    Log.Info($"[{name}] skipped, because it's turned off in the settings");
+                    continue;
+                }
+                var pack = Classify(dirs[i]);
+                if (pack != null)
+                {
+                    packs.Add(pack);
+                }
+            }
 
             // Every replacement first, then every patch, then every merge, so a pack's patches and
             // merges see the files as all packs' replacements left them.
@@ -146,6 +161,21 @@ namespace ContentPacks
                     Log.Error($"{WordTableMerge.Target}: merges skipped, because the game has no word table");
                 }
             }
+        }
+
+        // The game's words, from its own word table, for naming packs in glyphs.
+        private static HashSet<string> GameWords(Dictionary<string, string> textfiles)
+        {
+            var words = new HashSet<string>();
+            var table = textfiles.TryGetValue(WordTableMerge.Target, out var text) ? WordTable.Parse(text, out _) : null;
+            if (table != null)
+            {
+                foreach (var cells in table.Rows)
+                {
+                    words.Add(cells[table.Columns.WordCol]);
+                }
+            }
+            return words;
         }
 
         private sealed class Pack

@@ -25,6 +25,7 @@ namespace ContentPacks
         private void Awake()
         {
             Log = Logger;
+            PackToggles.Config = Config;
 
             LoadContentPacks = Config.Bind("Content", "LoadContentPacks", true,
                 Described("Load text files from content packs in BepInEx/content/<pack>/TxtData/. Takes effect at the next launch.", "message de group"));
@@ -42,7 +43,16 @@ namespace ContentPacks
         private void Update() => GlyphRenderer.Tick();
 
         // Mod Settings shows a setting tagged with its name in glyphs, as game word IDs.
-        private static ConfigDescription Described(string description, string glyphs) =>
-            new ConfigDescription(description, null, new Dictionary<string, string> { ["MessageFromAliens.Label"] = glyphs });
+        // Tags a setting for Mod Settings: its name in glyphs, and optionally the name of the
+        // settings page it is on.
+        internal static ConfigDescription Described(string description, string glyphs, string page = null)
+        {
+            var tags = new Dictionary<string, string> { ["MessageFromAliens.Label"] = glyphs };
+            if (page != null)
+            {
+                tags["MessageFromAliens.Page"] = page;
+            }
+            return new ConfigDescription(description, null, tags);
+        }
     }
 }
