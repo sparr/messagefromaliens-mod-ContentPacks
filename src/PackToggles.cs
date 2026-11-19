@@ -58,18 +58,6 @@ namespace ContentPacks
 
         // A positive number as the game writes it: base 7, one glyph per nonzero digit, written
         // <digit>e<place> above the ones place.
-        internal static string Number(int n)
-        {
-            var tokens = new List<string>();
-            for (var place = 0; n > 0; place++, n /= 7)
-            {
-                var digit = n % 7;
-                if (digit > 0)
-                {
-                    tokens.Insert(0, place == 0 ? digit.ToString() : $"{digit}e{place}");
-                }
-            }
-            return string.Join(" ", tokens);
-        }
+        internal static string Number(int n) => string.Join(" ", Global.ToBase7(n));
     }
 }
