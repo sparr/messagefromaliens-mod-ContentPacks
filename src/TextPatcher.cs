@@ -16,10 +16,11 @@ namespace ContentPacks
     // inserts lines is always placed by its context.
     //
     // When a hunk matches several places, without enforceContext a place where its context matches
-    // too wins first. Then the one nearest the line its header names wins. That line is shifted by
-    // the earlier hunks' size changes and by how far the last hunk landed from its own header line,
-    // as GNU patch does. Without enforceContext, a tie in distance goes to the place where the most
-    // context lines match. Any remaining tie is an error.
+    // too wins first, then the place where the most of its context lines match, since the game's
+    // files repeat lines across pages and a nearer place can be another page. Then the one nearest
+    // the line its header names wins. That line is shifted by the earlier hunks' size changes and
+    // by how far the last hunk landed from its own header line, as GNU patch does. Any remaining
+    // tie is an error.
     internal static class TextPatcher
     {
         private static readonly Regex HunkHeader = new Regex(@"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@");
@@ -250,14 +251,14 @@ namespace ContentPacks
                         matches = perfect;
                     }
                 }
-                var nearest = matches.Min(m => Math.Abs(m - expected));
-                matches = matches.Where(m => Math.Abs(m - expected) == nearest).ToList();
-                if (matches.Count > 1 && loose)
+                if (loose)
                 {
                     var scores = matches.ToDictionary(m => m, m => ContextScore(lines, old, oldIsContext, m));
                     var best = scores.Values.Max();
                     matches = matches.Where(m => scores[m] == best).ToList();
                 }
+                var nearest = matches.Min(m => Math.Abs(m - expected));
+                matches = matches.Where(m => Math.Abs(m - expected) == nearest).ToList();
                 if (matches.Count > 1)
                 {
                     Log.Error($"{where}:{h.PatchLine}: hunk {h.Number} matches {places} places, and {matches.Count} of them are equally near line {expected + 1}{(loose ? " with as many matching context lines" : "")}; add context lines that tell them apart");
