@@ -20,7 +20,8 @@ namespace ContentPacks
     // files repeat lines across pages and a nearer place can be another page. Then the one nearest
     // the line its header names wins. That line is shifted by the earlier hunks' size changes and
     // by how far the last hunk landed from its own header line, as GNU patch does. Any remaining
-    // tie is an error.
+    // tie is an error. A hunk whose context includes its page's title line is placed only within
+    // that page.
     internal static class TextPatcher
     {
         private static readonly Regex HunkHeader = new Regex(@"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@");
@@ -239,6 +240,22 @@ namespace ContentPacks
                 Log.Error($"{where}:{h.PatchLine}: hunk {h.Number} matches nowhere");
                 return false;
             }
+            // A hunk whose context holds its page's title line edits only that page. The game's
+            // files repeat lines across pages, so the same lines elsewhere are another page's.
+            // The context lines before the hunk's first added or removed line.
+            var before = h.Ops.TakeWhile(op => op == ' ').Count();
+            var title = PageTitle(old, before);
+            if (title != null)
+            {
+                // The page of the last context line before the change.
+                var onPage = matches.Where(m => TitleAbove(lines, m + before - 1) == title).ToList();
+                if (onPage.Count == 0)
+                {
+                    Log.Error($"{where}:{h.PatchLine}: hunk {h.Number} matches only outside its page {title.Substring(1)}, whose lines another pack may have changed");
+                    return false;
+                }
+                matches = onPage;
+            }
             if (matches.Count > 1)
             {
                 var places = matches.Count;
@@ -306,6 +323,33 @@ namespace ContentPacks
                 Log.Info($"{where}:{h.PatchLine}: hunk {h.Number} applied where its context differs");
             }
             return true;
+        }
+
+        // The last of the first count context lines that starts with #: the title of the page the
+        // hunk's change is in, or null.
+        private static string PageTitle(List<string> old, int count)
+        {
+            for (var k = count - 1; k >= 0; k--)
+            {
+                if (old[k].StartsWith("#"))
+                {
+                    return old[k];
+                }
+            }
+            return null;
+        }
+
+        // The nearest line at or above index that starts with #, or null.
+        private static string TitleAbove(List<string> lines, int index)
+        {
+            for (var i = Math.Min(index, lines.Count - 1); i >= 0; i--)
+            {
+                if (lines[i].StartsWith("#"))
+                {
+                    return lines[i];
+                }
+            }
+            return null;
         }
 
         // How many of the old side's context lines match the file when the old side starts at at.
