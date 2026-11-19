@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -42,9 +43,10 @@ namespace ContentPacks
 
         private static Kind KindOf(string code) => Kinds.TryGetValue(code, out var kind) ? kind : Kind.Strokes;
 
-        private static readonly Regex Number = new Regex(@"^[+-]?\d+(\.\d+)?$");
+        // The game parses stroke numbers with float.Parse, which takes only ASCII digits.
+        private static readonly Regex Number = new Regex(@"^[+-]?[0-9]+(\.[0-9]+)?$");
         // A number word: a digit at a place, like 5e2.
-        private static readonly Regex NumberWord = new Regex(@"^\d+e-?\d+$");
+        private static readonly Regex NumberWord = new Regex(@"^[0-9]+e-?[0-9]+$");
 
         private sealed class Row
         {
@@ -303,9 +305,14 @@ namespace ContentPacks
 
         private string RowProblem(Row row)
         {
-            // The game reads every word's first word type while it starts, and stops loading when
-            // a word has none.
-            if (row.Cells[cols.WordTypeCol].Trim().Length == 0)
+            // The game reads every word's meaning and word types with its tokenizer, and its first
+            // word type while it starts, and stops loading when either fails.
+            var problem = GameParse.Problem(row.Cells[cols.MeaningCol]) ?? GameParse.Problem(row.Cells[cols.WordTypeCol]);
+            if (problem != null)
+            {
+                return problem.Replace("its token", "a token");
+            }
+            if (Global.StringToListString(row.Cells[cols.WordTypeCol]).Count == 0)
             {
                 return "it has no word type";
             }
@@ -377,7 +384,7 @@ namespace ContentPacks
                 {
                     return "a stroke is empty";
                 }
-                if (!nums.All(Number.IsMatch))
+                if (!nums.All(n => Number.IsMatch(n) && float.TryParse(n, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out _)))
                 {
                     return "a stroke holds something other than numbers";
                 }

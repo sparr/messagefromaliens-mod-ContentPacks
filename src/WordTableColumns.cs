@@ -7,6 +7,7 @@ namespace ContentPacks
     internal sealed class WordTableColumns
     {
         internal const string Word = "word";
+        internal const string Meaning = "meaning";
         internal const string WordType = "wordtype";
         internal const string Redirect = "redirect";
         internal const string Struct = "struct";
@@ -15,6 +16,7 @@ namespace ContentPacks
         internal const string Modifier = "modifier";
 
         internal int WordCol;
+        internal int MeaningCol;
         internal int WordTypeCol;
         internal int RedirectCol;
         internal int StructCol;
@@ -30,6 +32,7 @@ namespace ContentPacks
             foreach (var (name, set) in new (string, Action<int>)[]
             {
                 (Word, i => c.WordCol = i),
+                (Meaning, i => c.MeaningCol = i),
                 (WordType, i => c.WordTypeCol = i),
                 (Redirect, i => c.RedirectCol = i),
                 (Struct, i => c.StructCol = i),
