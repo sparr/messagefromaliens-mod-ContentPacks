@@ -103,11 +103,12 @@ namespace ContentPacks
             var categories = Global.alien_message_category;
             foreach (var pack in packs)
             {
-                foreach (var (key, file) in pack.Replacements)
+                foreach (var (name, file) in pack.Replacements)
                 {
                     try
                     {
                         var text = File.ReadAllText(file);
+                        var key = GameKey(textfiles, name, pack.Name, file);
                         var isNew = !textfiles.ContainsKey(key);
                         textfiles[key] = text;
 
@@ -132,7 +133,8 @@ namespace ContentPacks
                     var label = $"[{pack.Name}] {Path.GetFileName(file)}";
                     try
                     {
-                        if (!textfiles.TryGetValue(key, out var text))
+                        var k = GameKey(textfiles, key, pack.Name, file);
+                        if (!textfiles.TryGetValue(k, out var text))
                         {
                             Log.Error($"{label}: skipped, because no game file or pack file is named {key}");
                             continue;
@@ -140,8 +142,8 @@ namespace ContentPacks
                         var patched = TextPatcher.Apply(text, File.ReadAllText(file), label, Plugin.EnforcePatchContext.Value);
                         if (patched != null)
                         {
-                            textfiles[key] = patched;
-                            Log.Info($"{label}: patched {key}");
+                            textfiles[k] = patched;
+                            Log.Info($"{label}: patched {k}");
                         }
                     }
                     catch (Exception e)
@@ -169,6 +171,23 @@ namespace ContentPacks
                     Log.Error($"{WordTableMerge.Target}: merges skipped, because the game has no word table");
                 }
             }
+        }
+
+        // The game's file a pack's file is for. Names match regardless of case, as files do on
+        // Windows; a pack file named with other letter cases is for the game's own file.
+        private static string GameKey(Dictionary<string, string> textfiles, string key, string pack, string file)
+        {
+            if (textfiles.ContainsKey(key))
+            {
+                return key;
+            }
+            var match = textfiles.Keys.FirstOrDefault(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
+            if (match == null)
+            {
+                return key;
+            }
+            Log.Warning($"[{pack}] {Path.GetFileName(file)}: applied to the game's file {match}, whose name differs only in letter case");
+            return match;
         }
 
         // The game's words, from its own word table, for naming packs in glyphs.
@@ -216,6 +235,7 @@ namespace ContentPacks
             var txtDir = Path.Combine(dir, "TxtData");
             if (!Directory.Exists(txtDir))
             {
+                Log.Warning($"[{pack.Name}]: nothing loaded, because the pack has no TxtData folder");
                 return pack;
             }
             var mainMerge = WordTableMerge.Target + ".csv";
@@ -230,7 +250,7 @@ namespace ContentPacks
                 {
                     pack.Replacements.Add((key, file));
                 }
-                else if (ending == ".patch")
+                else if (ending == ".patch" || name.EndsWith(".patch", StringComparison.Ordinal))
                 {
                     pack.Patches.Add((key, file));
                 }
