@@ -23,18 +23,22 @@ namespace ContentPacks
         // whose name can't be a setting name has no setting and always loads.
         internal static bool Enabled(string pack, int place, ICollection<string> words)
         {
-            ConfigEntry<bool> entry;
             try
             {
-                entry = Config.Bind(Section, pack, true,
-                    Plugin.Described($"Load the content pack {pack}. Takes effect at the next launch.", Label(pack, place, words), Page));
+                return Config.Bind(Section, pack, true,
+                    Plugin.Described($"Load the content pack {pack}. Takes effect at the next launch.", Label(pack, place, words), Page)).Value;
             }
-            catch (Exception e)
+            catch (ArgumentException e)
             {
                 Log.Warning($"[{pack}]: always loads, because its name can't be a setting name: {e.Message}");
                 return true;
             }
-            return entry.Value;
+            catch (Exception e) when (Config.TryGetEntry<bool>(Section, pack, out var entry))
+            {
+                // Bind applies the stored value, then saves the file; only the save failed.
+                Log.Warning($"[{pack}]: its setting couldn't be saved: {e.Message}");
+                return entry.Value;
+            }
         }
 
         // The pack's name in glyphs: its folder name's hyphen-separated parts, if they are all game
