@@ -16,9 +16,9 @@ namespace ContentPacks
     // empty. A word written as !word removes that row. Lines starting with # and blank lines are
     // skipped.
     //
-    // After all merges, each added or changed row is checked. A bad row is restored to what it was
-    // before the merges, or dropped if it is new, and the check repeats, since rows that used it
-    // may now be bad too.
+    // After all merges, each added or changed row is checked. Each change to a row is remembered:
+    // when a row fails a check, only its latest change is undone, and the checks repeat, since
+    // rows that used it may now fail too.
     internal sealed class WordTableMerge
     {
         internal const string Target = "newalien";
@@ -49,14 +49,23 @@ namespace ContentPacks
         // A number word: a digit at a place, like 5e2.
         private static readonly Regex NumberWord = new Regex(@"^[0-9]+e-?[0-9]+$");
 
-        private sealed class Row
+        private sealed class State
         {
             public string[] Cells;
+            public bool Removed;
+            public string Origin;
+        }
+
+        private sealed class Row
+        {
+            public string Word;
+            public string[] Cells;
+            public bool Removed;
             // The cells before any merge, or null for a row a merge added.
             public string[] Original;
-            public bool Removed;
-            // Where the last merge that touched this row was, for log messages.
-            public string Origin;
+            // The state before each change, latest last, with the change's origin.
+            public readonly Stack<State> Changes = new Stack<State>();
+            public string Origin => Changes.Count > 0 ? Changes.Peek().Origin : null;
         }
 
         private readonly WordTable table;
@@ -79,7 +88,7 @@ namespace ContentPacks
             this.textfiles = textfiles;
             foreach (var cells in table.Rows)
             {
-                var row = new Row { Cells = cells, Original = (string[])cells.Clone() };
+                var row = new Row { Word = cells[cols.WordCol], Cells = cells, Original = (string[])cells.Clone() };
                 rows.Add(row);
                 index[cells[cols.WordCol]] = row;
             }
@@ -117,6 +126,7 @@ namespace ContentPacks
                 return text;
             }
             Validate();
+            Origins.Clear();
             foreach (var row in touched.Distinct())
             {
                 if (!row.Removed && row.Origin != null)
@@ -124,10 +134,16 @@ namespace ContentPacks
                     Origins[row.Cells[cols.WordCol]] = row.Origin;
                 }
             }
-
+            Report();
             var output = new List<string> { table.HeaderLine };
             output.AddRange(rows.Where(r => !r.Removed).Select(r => string.Join(",", r.Cells)));
             return string.Join(table.Newline, output) + table.Newline;
+        }
+
+        private void Change(Row row, string where)
+        {
+            row.Changes.Push(new State { Cells = (string[])row.Cells?.Clone(), Removed = row.Removed, Origin = where });
+            touched.Add(row);
         }
 
         private void MergeFile(string label, string[] lines)
@@ -177,9 +193,8 @@ namespace ContentPacks
                         Log.Warning($"{where}: nothing to remove; no row has that word");
                         continue;
                     }
+                    Change(gone, where);
                     gone.Removed = true;
-                    gone.Origin = where;
-                    touched.Add(gone);
                     merged++;
                     continue;
                 }
@@ -188,26 +203,24 @@ namespace ContentPacks
                     Log.Error($"{where}: row skipped, because its word is empty or contains a space");
                     continue;
                 }
-                if (!index.TryGetValue(word, out var row) || row.Removed)
+                if (!index.TryGetValue(word, out var row))
+                {
+                    row = new Row { Word = word, Removed = true };
+                    rows.Add(row);
+                    index[word] = row;
+                }
+                Change(row, where);
+                if (row.Removed)
                 {
                     // A new word, or one added again after a removal: start from empty cells.
-                    var fresh = Enumerable.Repeat("", table.Header.Length).ToArray();
-                    fresh[cols.WordCol] = word;
-                    if (row == null)
-                    {
-                        row = new Row();
-                        rows.Add(row);
-                        index[word] = row;
-                    }
-                    row.Cells = fresh;
+                    row.Cells = Enumerable.Repeat("", table.Header.Length).ToArray();
+                    row.Cells[cols.WordCol] = word;
                     row.Removed = false;
                 }
                 for (var c = 1; c < columns.Length; c++)
                 {
                     row.Cells[columns[c]] = cells[c];
                 }
-                row.Origin = where;
-                touched.Add(row);
                 merged++;
             }
             if (columns == null)
@@ -265,6 +278,7 @@ namespace ContentPacks
             return columns;
         }
 
+        // Undoes the latest change of each row that fails, until none does.
         private void Validate()
         {
             var pending = touched.Distinct().ToList();
@@ -274,29 +288,33 @@ namespace ContentPacks
                 changed = false;
                 foreach (var row in pending)
                 {
+                    if (row.Changes.Count == 0 || IsOriginal(row))
+                    {
+                        continue;
+                    }
                     var problem = row.Removed ? RemovalProblem(row) : RowProblem(row);
                     if (problem == null)
                     {
                         continue;
                     }
                     changed = true;
-                    if (row.Original != null)
-                    {
-                        row.Cells = (string[])row.Original.Clone();
-                        row.Removed = false;
-                        Log.Error($"{row.Origin}: {problem}; the row keeps its earlier definition");
-                    }
-                    else
-                    {
-                        row.Removed = true;
-                        Log.Error($"{row.Origin}: {problem}; the new row is skipped");
-                    }
+                    var before = row.Changes.Pop();
+                    row.Cells = before.Cells;
+                    row.Removed = before.Removed;
+                    Log.Error($"{before.Origin}: {problem}; {(row.Removed ? (row.Original == null ? "the new row is skipped" : "the row stays removed") : "that change is undone")}");
                 }
-                pending = pending.Where(r => !(r.Original == null && r.Removed) && !SameAsOriginal(r)).ToList();
             }
             while (changed);
+        }
 
-            foreach (var row in touched.Distinct().Where(r => r.Removed && r.Original != null))
+        // The row as it was before any merge.
+        private static bool IsOriginal(Row r) =>
+            r.Original != null && !r.Removed && r.Cells.SequenceEqual(r.Original);
+
+        private void Report()
+        {
+            var all = touched.Distinct().ToList();
+            foreach (var row in all.Where(r => r.Removed && r.Original != null))
             {
                 var uses = TextUses(row.Original[cols.WordCol]);
                 if (uses > 0)
@@ -304,16 +322,13 @@ namespace ContentPacks
                     Log.Warning($"{row.Origin}: the removed word is still used {uses} times in the game's text");
                 }
             }
-            var changedRows = touched.Distinct().Count(r => r.Original != null && !r.Removed && !SameAsOriginal(r));
-            var added = touched.Distinct().Count(r => r.Original == null && !r.Removed);
-            var removed = touched.Distinct().Count(r => r.Original != null && r.Removed);
+            var changedRows = all.Count(r => r.Original != null && !r.Removed && !IsOriginal(r));
+            var added = all.Count(r => r.Original == null && !r.Removed);
+            var removed = all.Count(r => r.Original != null && r.Removed);
             Log.Info($"{Target}: {Rows(added)} added, {changedRows} changed, {removed} removed");
         }
 
         private static string Rows(int n) => n == 1 ? "1 row" : $"{n} rows";
-
-        private static bool SameAsOriginal(Row r) =>
-            r.Original != null && !r.Removed && r.Cells.SequenceEqual(r.Original);
 
         private string RowProblem(Row row)
         {
@@ -440,7 +455,7 @@ namespace ContentPacks
 
         private string RemovalProblem(Row row)
         {
-            var word = (row.Original ?? row.Cells)[cols.WordCol];
+            var word = row.Word;
             var users = index.Values.Count(r => !r.Removed && r != row
                 && (r.Cells[cols.Part1Col] == word || r.Cells[cols.Part2Col] == word
                     || (r.Cells[cols.RedirectCol] == word && KindOf(r.Cells[cols.StructCol]) == Kind.Strokes)
