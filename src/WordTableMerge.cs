@@ -112,7 +112,10 @@ namespace ContentPacks
                 var row = new Row { Word = word, Cells = cells, Short = table.Short.Contains(cells) };
                 stockRows.TryGetValue(word, out row.Stock);
                 rows.Add(row);
-                index[word] = row;
+                if (word != "")
+                {
+                    index[word] = row;
+                }
                 if (row.Stock == null || row.Short || !cells.SequenceEqual(row.Stock))
                 {
                     row.Changes.Push(row.Stock == null

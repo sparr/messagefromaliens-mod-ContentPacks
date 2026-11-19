@@ -4,16 +4,17 @@ using System.Collections.Generic;
 namespace ContentPacks
 {
     // The word table, parsed the way the game reads it: lines split on CR and LF with empty ones
-    // dropped, every ':' removed from a row, rows split on commas, and columns found by their
-    // exact header names.
+    // dropped, every ':' removed from a row, rows split on commas, columns found by their exact
+    // header names, and rows with an empty word skipped.
     internal sealed class WordTable
     {
         // The header row as written, and split into names.
         internal readonly string HeaderLine;
         internal readonly string[] Header;
         internal readonly WordTableColumns Columns;
-        // Every row after the header, padded to the header's width, in order. A row shorter than
-        // the header, which stops the game while it loads, is in Short too.
+        // Every row after the header with a word, padded to the header's width, in order. A row
+        // shorter than the header, which stops the game while it loads, is in Short too, and is
+        // kept even when its word is empty.
         internal readonly List<string[]> Rows;
         internal readonly HashSet<string[]> Short;
         // The line ending the table uses.
@@ -61,6 +62,11 @@ namespace ContentPacks
                     }
                     cells = padded;
                     shortRows.Add(cells);
+                }
+                else if (cells[columns.WordCol] == "")
+                {
+                    // The game skips a row with an empty word.
+                    continue;
                 }
                 rows.Add(cells);
             }
