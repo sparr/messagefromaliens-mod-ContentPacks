@@ -57,6 +57,7 @@ namespace ContentPacks
         {
             public string[] Cells;
             public bool Removed;
+            public bool Short;
             public string Origin;
         }
 
@@ -65,6 +66,8 @@ namespace ContentPacks
             public string Word;
             public string[] Cells;
             public bool Removed;
+            // Shorter than the header, which stops the game while it loads.
+            public bool Short;
             // The game's own row, or null for a word the game doesn't have.
             public string[] Stock;
             // The state before each change, latest last, with the change's origin.
@@ -106,11 +109,11 @@ namespace ContentPacks
             foreach (var cells in table.Rows)
             {
                 var word = cells[cols.WordCol];
-                var row = new Row { Word = word, Cells = cells };
+                var row = new Row { Word = word, Cells = cells, Short = table.Short.Contains(cells) };
                 stockRows.TryGetValue(word, out row.Stock);
                 rows.Add(row);
                 index[word] = row;
-                if (row.Stock == null || !cells.SequenceEqual(row.Stock))
+                if (row.Stock == null || row.Short || !cells.SequenceEqual(row.Stock))
                 {
                     row.Changes.Push(row.Stock == null
                         ? new State { Removed = true, Origin = TableLabel }
@@ -192,7 +195,7 @@ namespace ContentPacks
 
         private void Change(Row row, string where)
         {
-            row.Changes.Push(new State { Cells = (string[])row.Cells?.Clone(), Removed = row.Removed, Origin = where });
+            row.Changes.Push(new State { Cells = (string[])row.Cells?.Clone(), Removed = row.Removed, Short = row.Short, Origin = where });
             touched.Add(row);
         }
 
@@ -266,6 +269,7 @@ namespace ContentPacks
                     row.Cells = Enumerable.Repeat("", table.Header.Length).ToArray();
                     row.Cells[cols.WordCol] = word;
                     row.Removed = false;
+                    row.Short = false;
                 }
                 for (var c = 1; c < columns.Length; c++)
                 {
@@ -353,6 +357,7 @@ namespace ContentPacks
                     var before = row.Changes.Pop();
                     row.Cells = before.Cells;
                     row.Removed = before.Removed;
+                    row.Short = before.Short;
                     Log.Error($"{before.Origin}: {problem}; {(row.Removed ? (row.Stock == null ? "the new row is skipped" : "the row stays removed") : "that change is undone")}");
                 }
             }
@@ -362,7 +367,7 @@ namespace ContentPacks
 
         // The game's own row, unchanged.
         private static bool IsStock(Row r) =>
-            r.Stock != null && !r.Removed && r.Cells.SequenceEqual(r.Stock);
+            r.Stock != null && !r.Removed && !r.Short && r.Cells.SequenceEqual(r.Stock);
 
         private void Report()
         {
@@ -385,6 +390,10 @@ namespace ContentPacks
 
         private string RowProblem(Row row)
         {
+            if (row.Short)
+            {
+                return "it has fewer cells than the header, which stops the game while it loads";
+            }
             var word = row.Cells[cols.WordCol];
             // The game reads every word's meaning and word types with its tokenizer, and its first
             // word type while it starts, and stops loading when either fails.

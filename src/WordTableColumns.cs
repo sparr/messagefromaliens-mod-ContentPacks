@@ -2,8 +2,8 @@ using System;
 
 namespace ContentPacks
 {
-    // Where the word table's columns are, found by the names in its header row, as the game reads
-    // them. Names match regardless of case.
+    // Where the word table's columns are, found by the names in its header row exactly, as the
+    // game reads them. A merge file's header names them regardless of case.
     internal sealed class WordTableColumns
     {
         internal const string Word = "word";
@@ -44,7 +44,7 @@ namespace ContentPacks
                 (Modifier, i => c.ModifierCol = i),
             })
             {
-                var i = Find(header, name);
+                var i = Array.IndexOf(header, name);
                 if (i < 0)
                 {
                     missing = name;
@@ -55,6 +55,7 @@ namespace ContentPacks
             return c;
         }
 
+        // A merge file's name for a column, regardless of case and surrounding spaces.
         internal static int Find(string[] header, string name) =>
             Array.FindIndex(header, h => string.Equals(h.Trim(), name, StringComparison.OrdinalIgnoreCase));
     }
