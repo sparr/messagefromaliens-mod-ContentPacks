@@ -29,13 +29,21 @@ namespace ContentPacks
                 return;
             }
 
-            try
+            // A failed dump skips only the dump.
+            if (Plugin.DumpGameText.Value && !dumped)
             {
-                if (Plugin.DumpGameText.Value && !dumped)
+                try
                 {
                     Dump(textfiles);
                     dumped = true;
                 }
+                catch (Exception e)
+                {
+                    Plugin.Log.LogError($"Dumping the game's text failed: {e.Message}");
+                }
+            }
+            try
+            {
                 if (Plugin.LoadContentPacks.Value)
                 {
                     textfiles.TryGetValue(WordTableMerge.Target, out GlyphRenderer.OriginalTable);
