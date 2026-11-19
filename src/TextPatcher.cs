@@ -20,8 +20,9 @@ namespace ContentPacks
     // files repeat lines across pages and a nearer place can be another page. Then the one nearest
     // the line its header names wins. That line is shifted by the earlier hunks' size changes and
     // by how far the last hunk landed from its own header line, as GNU patch does. Any remaining
-    // tie is an error. A hunk whose context includes its page's title line is placed only within
-    // that page.
+    // tie is an error. A hunk with no context or removed lines, as diff -U0 writes an insertion,
+    // is placed by its header's line alone. A hunk whose context includes its page's title line
+    // is placed only within that page.
     internal static class TextPatcher
     {
         private static readonly Regex HunkHeader = new Regex(@"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@");
@@ -216,8 +217,15 @@ namespace ContentPacks
             }
             if (old.Count == 0)
             {
-                Log.Error($"{where}:{h.PatchLine}: hunk {h.Number} has no context or removed lines to place it");
-                return false;
+                if (expected < 0 || expected > lines.Count)
+                {
+                    Log.Error($"{where}:{h.PatchLine}: hunk {h.Number} has no context or removed lines, and its line number is past the end of the file");
+                    return false;
+                }
+                at = expected;
+                lines.InsertRange(at, h.Texts);
+                Log.Info($"{where}:{h.PatchLine}: hunk {h.Number} has no context or removed lines, so it was placed by its line number");
+                return true;
             }
             var exact = FindAll(lines, old, null);
             List<int> matches;
