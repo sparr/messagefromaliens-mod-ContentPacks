@@ -154,14 +154,17 @@ namespace ContentPacks
                 }
             }
             CheckText(textfiles, stock, categories);
+            // The word table is checked whenever a pack changed it, by replacement, patch, or merge.
             var merges = packs.SelectMany(p => p.Merges.Select(f => ($"[{p.Name}] {Path.GetFileName(f)}", f))).ToList();
-            if (merges.Count > 0)
+            stock.TryGetValue(WordTableMerge.Target, out var stockTable);
+            textfiles.TryGetValue(WordTableMerge.Target, out var currentTable);
+            if (merges.Count > 0 || currentTable != stockTable)
             {
-                if (textfiles.TryGetValue(WordTableMerge.Target, out var table))
+                if (currentTable != null)
                 {
                     try
                     {
-                        textfiles[WordTableMerge.Target] = WordTableMerge.Apply(table, merges, textfiles);
+                        textfiles[WordTableMerge.Target] = WordTableMerge.Apply(currentTable, stockTable, merges, textfiles);
                     }
                     catch (Exception e)
                     {

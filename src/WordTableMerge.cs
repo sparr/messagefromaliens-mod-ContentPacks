@@ -7,7 +7,8 @@ using System.Text.RegularExpressions;
 
 namespace ContentPacks
 {
-    // Merges keyed rows into the word table, the comma-separated text file named Target.
+    // Merges keyed rows into the word table, the comma-separated text file named Target, and
+    // checks every row the packs changed.
     //
     // A merge file's first line names the columns it sets, by the names in the table's header row,
     // regardless of case. Its first column is the word column, which is the key. A later line that
@@ -16,9 +17,10 @@ namespace ContentPacks
     // empty. A word written as !word removes that row. Lines starting with # and blank lines are
     // skipped.
     //
-    // After all merges, each added or changed row is checked. Each change to a row is remembered:
-    // when a row fails a check, only its latest change is undone, and the checks repeat, since
-    // rows that used it may now fail too.
+    // Rows a replaced or patched table changed are checked first, against the game's own table,
+    // then the merges apply. Each change to a row is remembered: when a row fails a check, only
+    // its latest change is undone, and the checks repeat, since rows that used it may now fail
+    // too.
     internal sealed class WordTableMerge
     {
         internal const string Target = "newalien";
@@ -49,6 +51,8 @@ namespace ContentPacks
         // A number word: a digit at a place, like 5e2.
         private static readonly Regex NumberWord = new Regex(@"^[0-9]+e-?[0-9]+$");
 
+        private const string TableLabel = Target + " as the packs replaced or patched it";
+
         private sealed class State
         {
             public string[] Cells;
@@ -61,8 +65,8 @@ namespace ContentPacks
             public string Word;
             public string[] Cells;
             public bool Removed;
-            // The cells before any merge, or null for a row a merge added.
-            public string[] Original;
+            // The game's own row, or null for a word the game doesn't have.
+            public string[] Stock;
             // The state before each change, latest last, with the change's origin.
             public readonly Stack<State> Changes = new Stack<State>();
             public string Origin => Changes.Count > 0 ? Changes.Peek().Origin : null;
@@ -79,37 +83,79 @@ namespace ContentPacks
         private readonly HashSet<string> redirectMarkers;
         // How many times each token appears in the game's text, built when first needed.
         private Dictionary<string, int> textTokens;
+        private bool modified;
         private readonly HashSet<Row> warnedCode = new HashSet<Row>();
 
-        private WordTableMerge(WordTable table, IDictionary<string, string> textfiles)
+        private WordTableMerge(WordTable table, WordTable stock, IDictionary<string, string> textfiles)
         {
             this.table = table;
             cols = table.Columns;
             this.textfiles = textfiles;
+            var stockRows = new Dictionary<string, string[]>();
+            foreach (var cells in stock?.Rows ?? new List<string[]>())
+            {
+                // The game's header and this one may order columns differently.
+                var aligned = new string[table.Header.Length];
+                for (var c = 0; c < aligned.Length; c++)
+                {
+                    var sc = Array.IndexOf(stock.Header, table.Header[c]);
+                    aligned[c] = sc >= 0 && sc < cells.Length ? cells[sc] : "";
+                }
+                stockRows[cells[stock.Columns.WordCol]] = aligned;
+            }
             foreach (var cells in table.Rows)
             {
-                var row = new Row { Word = cells[cols.WordCol], Cells = cells, Original = (string[])cells.Clone() };
+                var word = cells[cols.WordCol];
+                var row = new Row { Word = word, Cells = cells };
+                stockRows.TryGetValue(word, out row.Stock);
                 rows.Add(row);
-                index[cells[cols.WordCol]] = row;
+                index[word] = row;
+                if (row.Stock == null || !cells.SequenceEqual(row.Stock))
+                {
+                    row.Changes.Push(row.Stock == null
+                        ? new State { Removed = true, Origin = TableLabel }
+                        : new State { Cells = (string[])row.Stock.Clone(), Origin = TableLabel });
+                    touched.Add(row);
+                }
             }
-            redirectMarkers = new HashSet<string>(rows.Select(r => r.Cells[cols.RedirectCol]).Where(v => v.Length > 0 && !index.ContainsKey(v)));
+            // The game's rows a replacement or patch left out.
+            foreach (var kv in stockRows)
+            {
+                if (!index.ContainsKey(kv.Key))
+                {
+                    var row = new Row { Word = kv.Key, Cells = (string[])kv.Value.Clone(), Stock = kv.Value, Removed = true };
+                    row.Changes.Push(new State { Cells = (string[])kv.Value.Clone(), Origin = TableLabel });
+                    rows.Add(row);
+                    index[kv.Key] = row;
+                    touched.Add(row);
+                }
+            }
+            redirectMarkers = new HashSet<string>(stockRows.Values.Select(r => r[cols.RedirectCol]).Where(v => v.Length > 0 && !stockRows.ContainsKey(v)));
         }
 
-        // Returns the merged table, or text unchanged when nothing applies. files are in
-        // application order. Each item is the label used in log messages and the file's path.
-        internal static string Apply(string text, IList<(string Label, string Path)> files, IDictionary<string, string> textfiles)
+        // Returns the merged and checked table, or text unchanged when nothing applies. files are
+        // in application order. Each item is the label used in log messages and the file's path.
+        // stockText is the game's own table.
+        internal static string Apply(string text, string stockText, IList<(string Label, string Path)> files, IDictionary<string, string> textfiles)
         {
             var table = WordTable.Parse(text, out var problem);
             if (table == null)
             {
-                Log.Error($"{Target}: {problem}; merges skipped");
-                return text;
+                Log.Error($"{Target}: {problem}; the game's own word table is used");
+                return stockText ?? text;
             }
-            return new WordTableMerge(table, textfiles).Run(text, files);
+            var stock = stockText == null ? null : WordTable.Parse(stockText, out _);
+            return new WordTableMerge(table, stock, textfiles).Run(text, files);
         }
 
         private string Run(string text, IList<(string Label, string Path)> files)
         {
+            if (touched.Count > 0)
+            {
+                // A replaced or patched table: its own rows are checked before any merge.
+                modified |= Validate(touched.Distinct().ToList());
+            }
+            var fromTable = touched.Count;
             foreach (var (label, path) in files)
             {
                 try
@@ -121,11 +167,15 @@ namespace ContentPacks
                     Log.Error($"{label}: stopped by an error, keeping the rows merged before it: {e.Message}");
                 }
             }
-            if (touched.Count == 0)
+            if (touched.Count > fromTable)
+            {
+                modified = true;
+                Validate(touched.Skip(fromTable).Distinct().ToList());
+            }
+            if (!modified)
             {
                 return text;
             }
-            Validate();
             Origins.Clear();
             foreach (var row in touched.Distinct())
             {
@@ -278,17 +328,18 @@ namespace ContentPacks
             return columns;
         }
 
-        // Undoes the latest change of each row that fails, until none does.
-        private void Validate()
+        // Undoes the latest change of each row that fails, until none does. True if anything was
+        // undone.
+        private bool Validate(List<Row> pending)
         {
-            var pending = touched.Distinct().ToList();
+            var undone = false;
             bool changed;
             do
             {
                 changed = false;
                 foreach (var row in pending)
                 {
-                    if (row.Changes.Count == 0 || IsOriginal(row))
+                    if (row.Changes.Count == 0 || IsStock(row))
                     {
                         continue;
                     }
@@ -298,33 +349,35 @@ namespace ContentPacks
                         continue;
                     }
                     changed = true;
+                    undone = true;
                     var before = row.Changes.Pop();
                     row.Cells = before.Cells;
                     row.Removed = before.Removed;
-                    Log.Error($"{before.Origin}: {problem}; {(row.Removed ? (row.Original == null ? "the new row is skipped" : "the row stays removed") : "that change is undone")}");
+                    Log.Error($"{before.Origin}: {problem}; {(row.Removed ? (row.Stock == null ? "the new row is skipped" : "the row stays removed") : "that change is undone")}");
                 }
             }
             while (changed);
+            return undone;
         }
 
-        // The row as it was before any merge.
-        private static bool IsOriginal(Row r) =>
-            r.Original != null && !r.Removed && r.Cells.SequenceEqual(r.Original);
+        // The game's own row, unchanged.
+        private static bool IsStock(Row r) =>
+            r.Stock != null && !r.Removed && r.Cells.SequenceEqual(r.Stock);
 
         private void Report()
         {
             var all = touched.Distinct().ToList();
-            foreach (var row in all.Where(r => r.Removed && r.Original != null))
+            foreach (var row in all.Where(r => r.Removed && r.Stock != null))
             {
-                var uses = TextUses(row.Original[cols.WordCol]);
+                var uses = TextUses(row.Stock[cols.WordCol]);
                 if (uses > 0)
                 {
                     Log.Warning($"{row.Origin}: the removed word is still used {uses} times in the game's text");
                 }
             }
-            var changedRows = all.Count(r => r.Original != null && !r.Removed && !IsOriginal(r));
-            var added = all.Count(r => r.Original == null && !r.Removed);
-            var removed = all.Count(r => r.Original != null && r.Removed);
+            var changedRows = all.Count(r => r.Stock != null && !r.Removed && !IsStock(r));
+            var added = all.Count(r => r.Stock == null && !r.Removed);
+            var removed = all.Count(r => r.Stock != null && r.Removed);
             Log.Info($"{Target}: {Rows(added)} added, {changedRows} changed, {removed} removed");
         }
 
