@@ -465,7 +465,8 @@ namespace ContentPacks
         }
 
         // How many times a word appears in the game's text, other than the word table. The text is
-        // counted once, the first time this is needed.
+        // counted once, the first time this is needed. A line's #, @, or % prefix is not part of
+        // its first word.
         private int TextUses(string word)
         {
             if (textTokens == null)
@@ -479,7 +480,7 @@ namespace ContentPacks
                     }
                     foreach (var token in kv.Value.Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries))
                     {
-                        var t = token.TrimEnd('.');
+                        var t = token.TrimStart('#', '@', '%').TrimEnd('.');
                         textTokens[t] = textTokens.TryGetValue(t, out var n) ? n + 1 : 1;
                     }
                 }
