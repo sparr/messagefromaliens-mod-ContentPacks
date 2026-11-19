@@ -20,7 +20,7 @@ A file's name, up to the first dot, names a game message category (or other reso
 | `<name>.patch` | Applies a unified diff to the file. See [Text patches](#text-patches). |
 | `newalien.csv`, `newalien.<anything>.csv` | Merges rows into the word table. See [Word table merges](#word-table-merges). |
 
-Any other file is skipped with a warning.
+A `.patch` file can also have other parts in its name, as in `<name>.<anything>.patch`. A `.csv` file for any other name is skipped with an error, and any other file with a warning. A name that differs from one of the game's files only in letter case is for that file. A pack without a `TxtData` folder loads nothing, with a warning.
 
 Every replacement in every pack applies first, then every patch, then every merge. So a patch or merge sees the files as all packs' replacements left them.
 
@@ -30,7 +30,7 @@ Folders whose names start with `_` are skipped. This includes the `_dump` folder
 
 Each other pack gets a setting to turn it off. In Mod Settings, Content Packs' page has a line that opens a page of these settings, in loading order. A pack whose folder name is game words separated by hyphens, like `circle-length`, is labeled with those glyphs. Any other pack is labeled with its place in loading order, as a number. Packs are read as the game starts, so a change takes effect at the next launch. The settings are stored in the `Packs` section of the config file, one per folder name.
 
-Problems are logged with the pack, file, and line, and loading continues without the part that failed.
+Problems are logged with the pack, file, and line, and loading continues without the part that failed. After all replacements and patches, each changed text file is read the way the game reads it, and a file the game couldn't read, which would stop the game while it loads, is skipped: a pack's new file is left out, and a changed game file goes back to the game's own text.
 
 To get the original files as a starting point, enable [`DumpGameText`](#configuration). The files are written to `BepInEx/content/_dump/TxtData/`.
 
@@ -51,7 +51,7 @@ A new `.txt` file adds a message category, a set of pages. The name is arbitrary
 ```
 
 - A line starting with `#` begins a page, and its words are the page's title. Pages are found by title, so a title must be unique across all files.
-- Each following line, up to the next `#`, is one sentence: word IDs separated by spaces, drawn as glyphs. Long lines wrap automatically in-game; don't wrap them in the file.
+- Each following line, up to the next `#`, is one sentence: word IDs separated by spaces, drawn as glyphs. Long lines wrap automatically in-game; don't wrap them in the file. A blank line inside a page counts as an empty sentence; blank lines that end a page, and a final line break, are removed.
 - Tokens starting with `(` or `[` aren't drawn. Number tokens like `5e2` are drawn as numbers. See [Number tokens](#number-tokens). A number can carry a unit. See [Units](#units).
 
 #### Number tokens
@@ -79,7 +79,7 @@ A labeled number's last glyph gets the value as a label suffix, as in `6 (48)`. 
 
 Some forms don't work:
 
-- Some tokens stop the game while it loads the text, before the menus appear: `<m>ee<k>`, a line that starts with a decimal whose digits round away, such as `0.01`, a line that starts with `1F-3` or `5div5`, `1div0`, and integers past 19 digits. A huge exponent, such as in `5E400` or `1D400`, makes the game loop forever instead. Elsewhere in a line, `0.01` loads but draws no digits.
+- Some tokens stop the game while it loads the text, before the menus appear: `<m>ee<k>`, a line that starts with a decimal whose digits round away, such as `0.01`, a line that starts with `1F-3` or `5div5`, `1div0`, and integers past 19 digits. A huge exponent, such as in `5E400` or `1D400`, makes the game loop forever instead. Content Packs skips a file with any of these. Elsewhere in a line, `0.01` loads but draws no digits.
 - `<m>es<k>`, `<a>/<b>`, and `<d>e<k>` with more than one digit in `<d>` are each drawn as one unknown word.
 
 A line containing `(` anywhere skips number parsing, so every token in it is read as a word ID.
@@ -122,11 +122,11 @@ A quiz is a page with answer slots:
 - A line starting with `%` gives the correct answers, the glyphs that fill the slots in order. Multiple `%` lines are alternate solutions to the whole quiz. Each must fill the same number of slots as the first.
 - `?` in a line is an answer slot.
 
-Every quiz title in the game has the form `<words> riddle <n>`: `riddle` is the game's word for quiz, `<n>` is the quiz's number, and `<words>` names its chapter. Count gates count pages by that title pattern. See [Count gates](#count-gates).
+Every quiz title in the game has the form `<words> riddle <n>`: `riddle` is the game's word for quiz, `<n>` is the quiz's number, and `<words>` names its chapter. A quiz's title must contain that word after a space: the game treats only such pages as quizzes, so on any other page a click on an answer slot looks the glyph up instead of filling the slot, and a title that starts with that word stops the game when the quiz is won. Count gates count pages by that title pattern. See [Count gates](#count-gates).
 
 #### Menus
 
-A page whose text contains a `[` is a menu. Each of its lines links to the page whose title is that line's words, leaving out tokens starting with `[`. An empty `[]` token makes a page a menu without affecting any line.
+A menu's lines open the pages they name only where the game treats the page as a menu, which it decides by the page's depth: a chapter list, and each page linked from one. Each of a menu's lines links to the page whose title is that line's words, leaving out tokens starting with `[`. A menu page must also contain a `[` somewhere in its text, or the game can't find it as a quiz's parent, and stops on every redraw of a solved quiz it links. An empty `[]` token supplies one without affecting any line, but only as the first token of the page's first line, followed by words: as the first token of another line it hides that line, and alone on a line it stops the page from drawing. A page linked from a menu deeper down shows its lines as plain text, and is won as soon as it is shown.
 
 A new page can only be reached through a menu. To show a page, patch a line naming it into an existing menu. The example pack adds its pages to chapter 1's menu.
 
@@ -158,13 +158,13 @@ To use count gates in a pack:
 
 #### Chapters
 
-A chapter is a menu of lessons and quizzes, usually linked from one of the game's two chapter lists. Gate the line that links to it to control when it unlocks. For example, the game opens its second chapter with a count gate, after any five of the first chapter's quizzes. Gate its own lines on its quizzes to open its pages as the player progresses. Its menu is won when all its pages are, which can gate later content.
+A chapter is a menu of lessons and quizzes, linked from one of the game's two chapter lists, as its lines work only at that depth. Gate the line that links to it to control when it unlocks. For example, the game opens its second chapter with a count gate, after any five of the first chapter's quizzes. Gate its own lines on its quizzes to open its pages as the player progresses. Its menu is won when all its pages are, which can gate later content.
 
 New chapters can't award achievements.
 
 ### Text patches
 
-A `.patch` file is a unified diff of one file, as made by `diff -u` or `git diff`. Its file names are not used. Hunks apply in order, each to the result of the ones before it. If any hunk fails, the whole patch is skipped. Hunk line numbers are never enforced, and context lines are only enforced if [`EnforcePatchContext`](#configuration) is enabled or the hunk only adds lines with no removals. When a hunk matches several places, a place where its context matches too wins first, then the one nearest its header's line number, then the one where the most context lines match.
+A `.patch` file is a unified diff of one file, as made by `diff -u` or `git diff`. Its file names are not used. Hunks apply in order, each to the result of the ones before it. If any hunk fails, the whole patch is skipped. Hunk line numbers are never enforced, and context lines are only enforced if [`EnforcePatchContext`](#configuration) is enabled or the hunk only adds lines with no removals. A hunk with no context or removed lines, as `diff -U0` writes an insertion, is placed by its line number alone. A hunk whose context holds the `#` title of the page it changes is placed only within that page, since the game's files repeat lines across pages. When a hunk matches several places, a place where its context matches too wins first, then the one where the most context lines match, then the one nearest its header's line number.
 
 ### Word table merges
 
@@ -180,6 +180,7 @@ circumference,circumference equal diameter multiply pi,noun,lr,diameter,pi,
 This adds two nouns. `diameter` is a basic glyph, an octagon with a line through it. `circumference` is that glyph beside the game's glyph for pi. The definitions and word type are the game's own word IDs.
 
 - The first line names the columns the file sets, using the names in the word table's own header row, case insensitive: `word`, `meaning`, `wordtype`, `redirect`, `struct`, `component1`, `component2`, `modifier`, and `rename`. Column order doesn't matter, except the first column must be `word`.
+- A later line that names columns as the first line does starts a new set of columns for the rows after it.
 - A row whose word exists overwrites the columns the file names and keeps the rest. A row with a new word adds it, with the other columns empty. A cell left empty sets that field to empty. To leave a field alone, leave its column out of the file. If different words have different column requirements, put them in separate files.
 - `!<word>` in the word column removes that row. A word that other rows use as a component, as a basic glyph's redirect, or as a number's digit can't be removed. Removing a word that the game's text still uses is logged as a warning.
 - Lines starting with `#` and blank lines are skipped. No cell can contain a comma.
@@ -189,13 +190,15 @@ The `struct`, `component1`, `component2`, and `modifier` columns set the word's 
 
 After all merges, each added or changed row is checked. A row fails when:
 - it has no word type or no structure code, since the game stops loading on a word with no word type;
+- its meaning or word type has a token the game can't read;
+- it's a dictionary category's word, and it's renamed or marked as no word;
 - a component that must be a word names no word;
 - a basic glyph's strokes hold anything but numbers, or an empty or odd-length path;
 - its components lead back to the word itself;
 - a basic glyph's redirect names no word, since the game stops loading on one;
 - it's a number word whose name isn't a digit, `e`, and a place, like `5e2`, or whose digit names no word, since the game stops loading on one.
 
-A changed row that fails keeps its earlier definition, and a new row that fails is dropped. These checks are applied repeatedly, because one failed row could cause other rows to fail.
+When a row fails, the change that made it fail is undone: the row keeps its definition from before that line, and a new row that fails is dropped. These checks are applied repeatedly, because one failed row could cause other rows to fail. Rows changed by a replaced or patched `newalien` file are checked the same way, against the game's own rows, before any merge applies. The table is read as the game reads it: header names must match exactly, rows with an empty word are skipped, and a row with fewer cells than the header fails.
 
 New words, and words whose shape changed, get new sprites. See [Glyph sprites](#glyph-sprites).
 
@@ -255,7 +258,7 @@ Before they're arranged, both parts are scaled so their longer side is the same 
 
 The plain digits are basic `s` glyphs. Number words of the form `<digit>e<place>` use the `exp` struct to indicate they are dynamically generated according to the number drawing rules and based on the basic digit glyph. The components are ignored.
 
-Adding `exp` words has no visible effect. The game already has an `exp` glyph for every digit from 1 to 6 at places 1 to 5 and -1 to -5, so a new one would be at place 6 or more, or -6 or less. Page text never shows those: the game writes a number at place 4 or more, or -4 or less, in scientific form, as digits, the `E` glyph, and an exponent, instead of drawing its glyph.
+Adding `exp` words rarely has a visible effect. The game already has an `exp` glyph for every digit from 1 to 6 at places 1 to 5 and -1 to -5, so a new one would be at place 6 or more, or -6 or less. Page text shows those only through the `A` form, as in `5A6`, or an `F` form that reaches that place: other forms write a number at place 4 or more, or -4 or less, in scientific form, as digits, the `E` glyph, and an exponent, instead of drawing its glyph.
 
 ##### Modifiers
 
@@ -269,7 +272,7 @@ The `modifier` field is a string of characters, each setting one option. Most ap
 | `s` | `lr`, `ud` | Widen the gap to 30%. | 3 |
 | `z` | `lr`, `ud` | Narrow the gap to 10%. | 2 |
 | `n` | `lr`, `ud` | Narrow the gap to 5%. | 3 |
-| `+` | `o*` except `over` | Make the second part 70% of the box. | 70 |
+| `+` | `o*` except `over` | Make the second part 70% of the box. | 69 |
 | `-` | `o*` except `over` | Make the second part 40% of the box. | 9 |
 | `x` | `o*` except `over` | Make the second part 25% of the box. | 7 |
 | `x` | all two-component structs | Move the second part down by 5% of the box. | 7 |
