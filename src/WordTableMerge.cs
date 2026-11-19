@@ -24,8 +24,23 @@ namespace ContentPacks
         // The merge line that last added or changed each word, for later log messages.
         internal static readonly Dictionary<string, string> Origins = new Dictionary<string, string>();
 
-        // What a structure code's components hold, learned from the game's rows that use it.
-        private enum Kind { TwoParts, OnePart, Strokes, None }
+        // What a structure code's components hold.
+        private enum Kind { TwoParts, OnePart, Strokes, Number }
+
+        // The game's structure codes, as Global.Init reads them. It reads any other code as a
+        // basic glyph's.
+        private static readonly Dictionary<string, Kind> Kinds = new Dictionary<string, Kind>
+        {
+            ["s"] = Kind.Strokes, ["solid"] = Kind.Strokes,
+            ["d"] = Kind.OnePart, ["t"] = Kind.OnePart, ["q"] = Kind.OnePart, ["vd"] = Kind.OnePart,
+            ["flr"] = Kind.OnePart, ["fud"] = Kind.OnePart, ["fb"] = Kind.OnePart, ["shrink"] = Kind.OnePart,
+            ["ud"] = Kind.TwoParts, ["lr"] = Kind.TwoParts, ["oi"] = Kind.TwoParts, ["our"] = Kind.TwoParts,
+            ["oul"] = Kind.TwoParts, ["odr"] = Kind.TwoParts, ["odl"] = Kind.TwoParts, ["over"] = Kind.TwoParts,
+            ["od"] = Kind.TwoParts, ["ou"] = Kind.TwoParts, ["ol"] = Kind.TwoParts, ["or"] = Kind.TwoParts,
+            ["exp"] = Kind.Number,
+        };
+
+        private static Kind KindOf(string code) => Kinds.TryGetValue(code, out var kind) ? kind : Kind.Strokes;
 
         private static readonly Regex Number = new Regex(@"^[+-]?\d+(\.\d+)?$");
         // A number word: a digit at a place, like 5e2.
@@ -47,12 +62,12 @@ namespace ContentPacks
         private readonly List<Row> rows = new List<Row>();
         private readonly Dictionary<string, Row> index = new Dictionary<string, Row>();
         private readonly List<Row> touched = new List<Row>();
-        private readonly Dictionary<string, Kind> kinds;
         // Redirect values in the game's table that aren't words. The game treats them as no
         // redirect.
         private readonly HashSet<string> redirectMarkers;
         // How many times each token appears in the game's text, built when first needed.
         private Dictionary<string, int> textTokens;
+        private readonly HashSet<Row> warnedCode = new HashSet<Row>();
 
         private WordTableMerge(WordTable table, IDictionary<string, string> textfiles)
         {
@@ -65,7 +80,6 @@ namespace ContentPacks
                 rows.Add(row);
                 index[cells[cols.WordCol]] = row;
             }
-            kinds = LearnKinds();
             redirectMarkers = new HashSet<string>(rows.Select(r => r.Cells[cols.RedirectCol]).Where(v => v.Length > 0 && !index.ContainsKey(v)));
         }
 
@@ -111,25 +125,6 @@ namespace ContentPacks
             var output = new List<string> { table.HeaderLine };
             output.AddRange(rows.Where(r => !r.Removed).Select(r => string.Join(",", r.Cells)));
             return string.Join(table.Newline, output) + table.Newline;
-        }
-
-        private Dictionary<string, Kind> LearnKinds()
-        {
-            var counts = new Dictionary<string, Dictionary<Kind, int>>();
-            foreach (var r in rows)
-            {
-                var p1 = r.Cells[cols.Part1Col];
-                var p2 = r.Cells[cols.Part2Col];
-                var kind = index.ContainsKey(p1)
-                    ? (index.ContainsKey(p2) ? Kind.TwoParts : Kind.OnePart)
-                    : (p1.Length == 0 && p2.Length == 0 ? Kind.None : Kind.Strokes);
-                if (!counts.TryGetValue(r.Cells[cols.StructCol], out var c))
-                {
-                    counts[r.Cells[cols.StructCol]] = c = new Dictionary<Kind, int>();
-                }
-                c[kind] = c.TryGetValue(kind, out var n) ? n + 1 : 1;
-            }
-            return counts.ToDictionary(kv => kv.Key, kv => kv.Value.OrderByDescending(x => x.Value).First().Key);
         }
 
         private void MergeFile(string label, string[] lines)
@@ -259,14 +254,13 @@ namespace ContentPacks
         private void Validate()
         {
             var pending = touched.Distinct().ToList();
-            var warnedCodes = new HashSet<Row>();
             bool changed;
             do
             {
                 changed = false;
                 foreach (var row in pending)
                 {
-                    var problem = row.Removed ? RemovalProblem(row) : RowProblem(row, warnedCodes);
+                    var problem = row.Removed ? RemovalProblem(row) : RowProblem(row);
                     if (problem == null)
                     {
                         continue;
@@ -307,7 +301,7 @@ namespace ContentPacks
         private static bool SameAsOriginal(Row r) =>
             r.Original != null && !r.Removed && r.Cells.SequenceEqual(r.Original);
 
-        private string RowProblem(Row row, HashSet<Row> warnedCodes)
+        private string RowProblem(Row row)
         {
             // The game reads every word's first word type while it starts, and stops loading when
             // a word has none.
@@ -320,30 +314,13 @@ namespace ContentPacks
             {
                 return "it has no structure code";
             }
+            if (!Kinds.ContainsKey(code) && warnedCode.Add(row))
+            {
+                Log.Warning($"{row.Origin}: the game doesn't know this structure code, so it draws the word as a basic glyph");
+            }
             var p1 = row.Cells[cols.Part1Col];
             var p2 = row.Cells[cols.Part2Col];
-            if (!kinds.TryGetValue(code, out var kind))
-            {
-                // The game may know the code without using it, so the components could be read
-                // either way. Each must work as whatever it could be.
-                if (warnedCodes.Add(row))
-                {
-                    Log.Warning($"{row.Origin}: no game word uses this structure code");
-                }
-                if (!Live(p1) && StrokeProblem(p1) != null)
-                {
-                    return "the first component is neither a word nor a stroke string";
-                }
-                if (p2.Length > 0 && !Live(p2))
-                {
-                    return "the second component names no word";
-                }
-                if (Live(p1) && InCycle(row))
-                {
-                    return "its components contain the word itself";
-                }
-                return RedirectProblem(row);
-            }
+            var kind = KindOf(code);
             switch (kind)
             {
                 case Kind.TwoParts:
@@ -365,7 +342,7 @@ namespace ContentPacks
                         return strokes;
                     }
                     break;
-                case Kind.None:
+                case Kind.Number:
                     // The game draws a number word from its own name, and files it under the
                     // word named by its first character.
                     var word = row.Cells[cols.WordCol];
@@ -424,21 +401,15 @@ namespace ContentPacks
             return "its redirect names no word";
         }
 
-        // Whether the game reads a row's redirect: basic glyphs, and codes no game word uses,
-        // which the game may read as basic glyphs.
-        private bool UsesRedirect(Row r) =>
-            !kinds.TryGetValue(r.Cells[cols.StructCol], out var kind) || kind == Kind.Strokes;
-
         private bool IsNumberOf(Row r, string digit) =>
-            digit.Length == 1 && kinds.TryGetValue(r.Cells[cols.StructCol], out var kind) && kind == Kind.None
-            && r.Cells[cols.WordCol].StartsWith(digit);
+            digit.Length == 1 && KindOf(r.Cells[cols.StructCol]) == Kind.Number && r.Cells[cols.WordCol].StartsWith(digit);
 
         private string RemovalProblem(Row row)
         {
             var word = (row.Original ?? row.Cells)[cols.WordCol];
             var users = index.Values.Count(r => !r.Removed && r != row
                 && (r.Cells[cols.Part1Col] == word || r.Cells[cols.Part2Col] == word
-                    || (r.Cells[cols.RedirectCol] == word && UsesRedirect(r))
+                    || (r.Cells[cols.RedirectCol] == word && KindOf(r.Cells[cols.StructCol]) == Kind.Strokes)
                     || IsNumberOf(r, word)));
             return users > 0 ? $"can't remove a word that {users} other rows use as a component, redirect, or number digit" : null;
         }
@@ -475,18 +446,7 @@ namespace ContentPacks
 
         private IEnumerable<Row> Parts(Row r)
         {
-            if (!kinds.TryGetValue(r.Cells[cols.StructCol], out var kind))
-            {
-                // An unused code: any component that names a word may be a part.
-                foreach (var c in new[] { r.Cells[cols.Part1Col], r.Cells[cols.Part2Col] })
-                {
-                    if (index.TryGetValue(c, out var part) && !part.Removed)
-                    {
-                        yield return part;
-                    }
-                }
-                yield break;
-            }
+            var kind = KindOf(r.Cells[cols.StructCol]);
             if ((kind == Kind.TwoParts || kind == Kind.OnePart) && index.TryGetValue(r.Cells[cols.Part1Col], out var a) && !a.Removed)
             {
                 yield return a;
