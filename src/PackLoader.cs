@@ -101,6 +101,7 @@ namespace ContentPacks
             // Every replacement first, then every patch, then every merge, so a pack's patches and
             // merges see the files as all packs' replacements left them.
             var categories = Global.alien_message_category;
+            var stock = new Dictionary<string, string>(textfiles);
             foreach (var pack in packs)
             {
                 foreach (var (name, file) in pack.Replacements)
@@ -152,6 +153,7 @@ namespace ContentPacks
                     }
                 }
             }
+            CheckText(textfiles, stock, categories);
             var merges = packs.SelectMany(p => p.Merges.Select(f => ($"[{p.Name}] {Path.GetFileName(f)}", f))).ToList();
             if (merges.Count > 0)
             {
@@ -188,6 +190,40 @@ namespace ContentPacks
             }
             Log.Warning($"[{pack}] {Path.GetFileName(file)}: applied to the game's file {match}, whose name differs only in letter case");
             return match;
+        }
+
+        // Checks each text file the packs changed, other than the word table, as the game will read
+        // it. A file the game can't read is dropped, with the game's own text restored, since one
+        // bad line would stop the game while it loads. Blank lines that end a page are removed
+        // first.
+        private static void CheckText(Dictionary<string, string> textfiles, Dictionary<string, string> stock, List<string> categories)
+        {
+            foreach (var key in textfiles.Keys.ToList())
+            {
+                var text = textfiles[key];
+                if (key == WordTableMerge.Target || (stock.TryGetValue(key, out var original) && original == text))
+                {
+                    continue;
+                }
+                text = GameParse.Tidy(text);
+                textfiles[key] = text;
+                var problem = GameParse.FileProblem(text, out var line);
+                if (problem == null)
+                {
+                    continue;
+                }
+                if (stock.TryGetValue(key, out original))
+                {
+                    textfiles[key] = original;
+                    Log.Error($"{key}: as the packs left it, line {line} can't be read: {problem}; the game's own {key} is used");
+                }
+                else
+                {
+                    textfiles.Remove(key);
+                    categories?.Remove(key);
+                    Log.Error($"{key}: line {line} can't be read: {problem}; the file is skipped");
+                }
+            }
         }
 
         // The game's words, from its own word table, for naming packs in glyphs.
