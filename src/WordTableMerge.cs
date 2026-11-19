@@ -210,7 +210,11 @@ namespace ContentPacks
                 touched.Add(row);
                 merged++;
             }
-            if (columns != null)
+            if (columns == null)
+            {
+                Log.Warning($"{label}: nothing merged, because it has no header line");
+            }
+            else
             {
                 Log.Info($"{label}: merged {Rows(merged)}");
             }
