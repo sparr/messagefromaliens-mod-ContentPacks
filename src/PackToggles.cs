@@ -23,6 +23,13 @@ namespace ContentPacks
         // whose name can't be a setting name has no setting and always loads.
         internal static bool Enabled(string pack, int place, ICollection<string> words)
         {
+            // BepInEx reads a saved line that starts with # as a comment, so such a setting would
+            // never keep its value.
+            if (pack.StartsWith("#"))
+            {
+                Log.Warning($"[{pack}]: always loads, because a setting name can't start with #");
+                return true;
+            }
             try
             {
                 return Config.Bind(Section, pack, true,
