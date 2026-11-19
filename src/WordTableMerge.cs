@@ -317,6 +317,7 @@ namespace ContentPacks
 
         private string RowProblem(Row row)
         {
+            var word = row.Cells[cols.WordCol];
             // The game reads every word's meaning and word types with its tokenizer, and its first
             // word type while it starts, and stops loading when either fails.
             var problem = GameParse.Problem(row.Cells[cols.MeaningCol]) ?? GameParse.Problem(row.Cells[cols.WordTypeCol]);
@@ -364,7 +365,6 @@ namespace ContentPacks
                 case Kind.Number:
                     // The game draws a number word from its own name, and files it under the
                     // word named by its first character.
-                    var word = row.Cells[cols.WordCol];
                     if (!NumberWord.IsMatch(word))
                     {
                         return "a number word must be a digit, e, and a place, like 5e2";
@@ -378,6 +378,21 @@ namespace ContentPacks
             if ((kind == Kind.TwoParts || kind == Kind.OnePart) && InCycle(row))
             {
                 return "its components contain the word itself";
+            }
+            // The dictionary page files every word under the game's categories by these words'
+            // names; it fails to draw if one is renamed or marked as no word.
+            if (Global.category_list != null && Global.category_list.Contains(word))
+            {
+                var rename = row.Cells[cols.RenameCol].Trim();
+                if (rename != "" && rename != word)
+                {
+                    return "a dictionary category's word can't be renamed";
+                }
+                var redirect = row.Cells[cols.RedirectCol];
+                if (redirectMarkers.Contains(redirect))
+                {
+                    return "a dictionary category's word can't be marked as no word";
+                }
             }
             return null;
         }

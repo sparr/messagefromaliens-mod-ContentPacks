@@ -8,6 +8,7 @@ namespace ContentPacks
     {
         internal const string Word = "word";
         internal const string Meaning = "meaning";
+        internal const string Rename = "rename";
         internal const string WordType = "wordtype";
         internal const string Redirect = "redirect";
         internal const string Struct = "struct";
@@ -17,6 +18,7 @@ namespace ContentPacks
 
         internal int WordCol;
         internal int MeaningCol;
+        internal int RenameCol;
         internal int WordTypeCol;
         internal int RedirectCol;
         internal int StructCol;
@@ -33,6 +35,7 @@ namespace ContentPacks
             {
                 (Word, i => c.WordCol = i),
                 (Meaning, i => c.MeaningCol = i),
+                (Rename, i => c.RenameCol = i),
                 (WordType, i => c.WordTypeCol = i),
                 (Redirect, i => c.RedirectCol = i),
                 (Struct, i => c.StructCol = i),
