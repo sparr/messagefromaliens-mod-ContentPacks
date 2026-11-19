@@ -305,13 +305,13 @@ namespace ContentPacks
                         job.Problem = "its strokes give no line segments";
                         return;
                     }
-                    if (count <= MaxPathSegments)
+                    if (count <= MaxPathSegments && count != BrokenSegments)
                     {
                         shapes.Add(m.DrawPath1(strokes, Far, 0, -1f, default, true, false));
                     }
                     else
                     {
-                        Log.Debug($"{Origin(word)}: its glyph has {count} line segments, more than Shapes2D's {MaxPathSegments}, so it's drawn in pieces");
+                        Log.Debug($"{Origin(word)}: its glyph has {count} line segments, which Shapes2D cannot draw as one path, so it is drawn in pieces");
                         shapes.AddRange(DrawPathInPieces(m, strokes));
                     }
                 }
@@ -469,7 +469,12 @@ namespace ContentPacks
         private static readonly Vector3 Far = new Vector3(1000f, 1000f, 0f);
 
         // Shapes2D draws a path of at most this many segments.
-        internal static int MaxPathSegments = Shapes2D.Shape.MaxPathSegments;
+        internal static readonly int MaxPathSegments = Shapes2D.Shape.MaxPathSegments;
+        // For a path of exactly this many segments, Shapes2D turns on both its 24- and its
+        // 32-segment shader variants (Shape.ApplyShaderPropertiesToMaterial), and the 24-segment
+        // one draws, leaving out the last segment. Pieces are cut one segment shorter.
+        private const int BrokenSegments = 25;
+        private const int PieceSegments = BrokenSegments - 1;
 
         // Line segments in a glyph's strokes, as Draw.DrawPath1 builds them, leaving out its
         // width markers: one-point strokes with y -100.
@@ -487,7 +492,7 @@ namespace ContentPacks
             return count;
         }
 
-        // Draw.DrawPath1's steps, with the path split across shapes of at most MaxPathSegments
+        // Draw.DrawPath1's steps, with the path split across shapes of at most PieceSegments
         // segments. The whole glyph is scaled before it's split, so every piece lines up.
         private static List<Shape> DrawPathInPieces(Draw m, List<List<Vector2>> pos)
         {
@@ -523,7 +528,7 @@ namespace ContentPacks
                 }
             }
             var shapes = new List<Shape>();
-            for (var startIndex = 0; startIndex < segments.Count; startIndex += MaxPathSegments)
+            for (var startIndex = 0; startIndex < segments.Count; startIndex += PieceSegments)
             {
                 var shape = UnityEngine.Object.Instantiate(m.shape_prefab).GetComponent<Shape>();
                 shape.settings.shapeType = ShapeType.Path;
@@ -532,7 +537,7 @@ namespace ContentPacks
                 shape.settings.fillType = FillType.MatchOutlineColor;
                 shape.settings.outlineColor = m.DefaultColor(0);
                 shape.transform.localScale = new Vector3(1f, 1f);
-                shape.settings.pathSegments = segments.GetRange(startIndex, Math.Min(MaxPathSegments, segments.Count - startIndex)).ToArray();
+                shape.settings.pathSegments = segments.GetRange(startIndex, Math.Min(PieceSegments, segments.Count - startIndex)).ToArray();
                 shape.transform.position = Far;
                 shape.ComputeAndApply();
                 shapes.Add(shape);
