@@ -10,10 +10,11 @@ namespace ContentPacks
     // Merges keyed rows into the word table, the comma-separated text file named Target.
     //
     // A merge file's first line names the columns it sets, by the names in the table's header row,
-    // regardless of case. Its first column is the word column, which is the key. A row whose word
-    // exists overwrites the named columns and keeps the rest. A row with a new word is added with
-    // the other columns empty. A word written as !word removes that row. Lines starting with #
-    // and blank lines are skipped.
+    // regardless of case. Its first column is the word column, which is the key. A later line that
+    // names columns the same way starts a new set of columns. A row whose word exists overwrites
+    // the named columns and keeps the rest. A row with a new word is added with the other columns
+    // empty. A word written as !word removes that row. Lines starting with # and blank lines are
+    // skipped.
     //
     // After all merges, each added or changed row is checked. A bad row is restored to what it was
     // before the merges, or dropped if it is new, and the check repeats, since rows that used it
@@ -146,8 +147,15 @@ namespace ContentPacks
                     Log.Warning($"{where}: the game removes every ':' from a row, including one inside a value");
                 }
                 var cells = WordTable.StripColons(line).Split(',');
-                if (columns == null)
+                // The first line names the columns, and so does a later one whose cells all do,
+                // as where two merge files were joined.
+                if (columns == null || (cells.Length > 1 && cells.All(c => WordTableColumns.Find(table.Header, c.Trim()) >= 0)
+                    && WordTableColumns.Find(table.Header, cells[0].Trim()) == cols.WordCol))
                 {
+                    if (columns != null)
+                    {
+                        Log.Info($"{where}: a new header line; the rows after it set its columns");
+                    }
                     columns = MapHeader(cells, where);
                     if (columns == null)
                     {
