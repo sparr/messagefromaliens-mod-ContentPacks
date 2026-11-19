@@ -52,7 +52,67 @@ A new `.txt` file adds a message category, a set of pages. The name is arbitrary
 
 - A line starting with `#` begins a page, and its words are the page's title. Pages are found by title, so a title must be unique across all files.
 - Each following line, up to the next `#`, is one sentence: word IDs separated by spaces, drawn as glyphs. Long lines wrap automatically in-game; don't wrap them in the file.
-- Tokens starting with `(` or `[` aren't drawn. Number tokens like `5e2` are drawn as numbers. See [Numbers](#numbers).
+- Tokens starting with `(` or `[` aren't drawn. Number tokens like `5e2` are drawn as numbers. See [Number tokens](#number-tokens). A number can carry a unit. See [Units](#units).
+
+#### Number tokens
+
+A token that matches one of these forms is drawn as a base-7 number. Integers, decimals, and the `e` and `E` forms can start with `-`, which adds the negative glyph.
+
+| Token | Value | Drawn as | Labeled |
+|---|---|---|---|
+| `48` | the integer | its digits, or scientific form from 343 up or -343 down | yes |
+| `1.5` | the decimal | its digits to two base-7 places, rounded, or scientific form from 2401 up or when negative | yes |
+| `<d>e<k>` | d * 7^k | the glyph of the single digit `d` at place `k`, or scientific form when `k` is 4 or more, or -4 or less | yes |
+| `<d>x<k>` | d * 7^k | like `<d>e<k>` | no, if the page has a `(` token |
+| `<d>A<k>` | d * 7^k | the glyph of the single digit `d` at place `k` | no, if the page has a `(` token |
+| `<m>E<k>` | m * 7^k | scientific form, two significant digits | yes |
+| `<m>F<k>` | m * 7^k | its digits to two base-7 places | yes |
+| `<m>D<k>` | m * 10^k | scientific form, two significant digits | yes |
+| `<m>DS<k>` | m * 10^k | scientific form, three significant digits | yes |
+| `<a>div<b>` | a / b | its exact digits, with a repeat glyph before the repeating digits | yes, as `a/b` |
+| `<n>N` | the integer | its digits, never scientific form | yes |
+| `Infinity` | infinity | the infinity glyph | no |
+
+Scientific form is the digits, rounded, then the `E` glyph and the exponent. `<d>` is one digit from 1 to 6. `<m>`, `<a>`, `<b>`, `<n>`, and `<k>` are written in decimal.
+
+A labeled number's last glyph gets the value as a label suffix, as in `6 (48)`. An `e` token at a negative place is labeled as a fraction, as in `(3/7)`. The suffix appears only when the game's value conversion setting is on and the player has won 11 quizzes in chapter 1.
+
+Some forms don't work:
+
+- Some tokens stop the game while it loads the text, before the menus appear: `<m>ee<k>`, a line that starts with a decimal whose digits round away, such as `0.01`, a line that starts with `1F-3` or `5div5`, `1div0`, and integers past 19 digits. A huge exponent, such as in `5E400` or `1D400`, makes the game loop forever instead. Elsewhere in a line, `0.01` loads but draws no digits.
+- `<m>es<k>`, `<a>/<b>`, and `<d>e<k>` with more than one digit in `<d>` are each drawn as one unknown word.
+
+A line containing `(` anywhere skips number parsing, so every token in it is read as a word ID.
+
+#### Units
+
+A number token can end with a unit tag: `H` or `A` and then a unit code, with no space, as in `5Hm` or `3Acel`. The game draws the number, then the unit's glyph.
+
+- `H` means the number is in human units. The game converts it to alien units and draws the converted value. Only integers, decimals, and the `D`, `DS`, `E`, and `F` forms are converted. Other number forms, like `5e1`, ignore `H` and are read as alien units, as with `A`. A `div` fraction loses its divisor when it has a unit tag: `6div2Hm` is read as `6Hm`.
+- `A` means the number is already in alien units, and is drawn as written. Integers, decimals, and the `E`, `F`, `D`, and `DS` forms work. Other forms get a wrong label: `1div3Am` is labeled as 1, and `5A2Am` and `InfinityAm` as 0.
+
+The unit's last glyph gets a label suffix with the value in human units and the unit's symbol. For example, `3Am` draws 3 and the length glyph, which gets the suffix `4.79 m`. The suffix appears only when the game's value conversion setting is on and the player has won enough quizzes of the chapter the game counts for the unit's code: five of one chapter's quizzes for most codes, two of a second chapter's for six codes, and three of a third chapter's for ten codes. Pages a pack titles like that chapter's quizzes count too. See [Count gates](#count-gates).
+
+Some of the codes:
+
+| Code | Quantity | Symbol | 1 alien unit |
+|---|---|---|---|
+| `m` | length | m | 1.596 m |
+| `m2` | area | m² | 2.547 m² |
+| `m3` | volume | m³ | 4.065 m³ |
+| `kg` | mass | kg | 11.85 kg |
+| `s` | time | s | 0.64 s |
+| `mps` | speed | m/s | 2.494 m/s |
+| `cel` | temperature | °C | 2.041 °C |
+
+The game has about 40 codes in all. Their conversions are in `Global.HumanUnitToAlienUnit` and their glyphs and symbols in `Global.StringToListString`. Some don't work:
+
+- Kelvin (`k`) is converted by multiplying instead of adding an offset, so both its drawn value and its label are wrong. `0Hk` draws 0, and `3Ak` is labeled `0.02 K`.
+- A few codes have no symbol of their own. Their label shows the code instead, and they draw a placeholder glyph, or for three of them, the unrelated word whose ID is the code.
+
+Test any code not in the table before using it.
+
+Content packs can't add new units.
 
 #### Quizzes
 
@@ -74,9 +134,7 @@ A new page can only be reached through a menu. To show a page, patch a line nami
 
 A gate is a token like `[word-word-word]`: a page's title, with its words joined by `-`.
 
-A menu line holding a gate shows only once that page has been won. A line with several gates needs all of them. The game puts gates at the start of the line, as in `[<gate>] <title>`.
-
-In an ordinary page, a line starting with a gate is hidden until it passes.
+A line starting with a gate, as in `[<gate>] <title>`, shows only once that page has been won. This works in menus and ordinary pages alike. The game checks only a line's first token to draw the line, so a gate anywhere else in the line, including a second gate after the first, is not drawn and doesn't hide it, but it does keep the page the line opens out of its parent menus' chain until that gate passes. The first line of a page's text is never hidden this way. Two of the game's menus gate every line, so they always show their first line. Content Packs keeps this behavior. To gate a line a pack adds, don't make it the first line of its page.
 
 A page is won:
 
