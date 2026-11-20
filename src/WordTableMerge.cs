@@ -46,7 +46,9 @@ namespace ContentPacks
 
         private static Kind KindOf(string code) => Kinds.TryGetValue(code, out var kind) ? kind : Kind.Strokes;
 
-        // The game parses stroke numbers with float.Parse, which takes only ASCII digits.
+        // The game finds a stroke's numbers with this regex and ignores the text around them.
+        private static readonly Regex StrokeNumber = new Regex(@"[+-]?\d+(\.\d+)?");
+        // It parses each one with float.Parse, which takes only ASCII digits.
         private static readonly Regex Number = new Regex(@"^[+-]?[0-9]+(\.[0-9]+)?$");
         // A number word: a digit at a place, like 5e2.
         private static readonly Regex NumberWord = new Regex(@"^[0-9]+e-?[0-9]+$");
@@ -91,6 +93,7 @@ namespace ContentPacks
         private bool modified;
         private readonly HashSet<Row> warnedCode = new HashSet<Row>();
         private readonly HashSet<Row> warnedOdd = new HashSet<Row>();
+        private readonly HashSet<Row> warnedText = new HashSet<Row>();
         // The game's own rows by word, aligned to this table's columns.
         private readonly Dictionary<string, string[]> stockRows = new Dictionary<string, string[]>();
         // Each word's dictionary categories in the game's own table.
@@ -472,6 +475,10 @@ namespace ContentPacks
                     {
                         return strokes;
                     }
+                    if (HasOtherText(p1) && warnedText.Add(row))
+                    {
+                        Log.Warning($"{row.Origin}: a stroke holds text other than numbers and spaces, which the game ignores");
+                    }
                     if (HasOddStroke(p1) && warnedOdd.Add(row))
                     {
                         Log.Warning($"{row.Origin}: a stroke has an odd count of numbers, so the game drops its last number");
@@ -521,23 +528,31 @@ namespace ContentPacks
         }
 
         // The game draws an empty first component as a default stroke, so empty is allowed. An
-        // empty stroke, as a trailing ; makes, is a path with no points, which draws nothing.
+        // empty stroke, as a trailing ; makes, is a path with no points, which draws nothing. The
+        // game stops loading when float.Parse fails on a number its regex finds, as on non-ASCII
+        // digits or a value too large for a float.
         private static string StrokeProblem(string s)
         {
             foreach (var stroke in s.Split(';'))
             {
-                var nums = stroke.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                if (!nums.All(n => Number.IsMatch(n) && float.TryParse(n, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out _)))
+                foreach (Match m in StrokeNumber.Matches(stroke))
                 {
-                    return "a stroke holds something other than numbers";
+                    if (!Number.IsMatch(m.Value) || !float.TryParse(m.Value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out _))
+                    {
+                        return "a stroke holds a number the game can't read";
+                    }
                 }
             }
             return null;
         }
 
+        // Text the game's regex skips, other than spaces, is likely a mistake.
+        private static bool HasOtherText(string s) =>
+            s.Split(';').Any(stroke => StrokeNumber.Replace(stroke, " ").Any(c => !char.IsWhiteSpace(c)));
+
         // The game reads a stroke's numbers in pairs and ignores a last one left over.
         private static bool HasOddStroke(string s) =>
-            s.Split(';').Any(stroke => stroke.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries).Length % 2 != 0);
+            s.Split(';').Any(stroke => StrokeNumber.Matches(stroke).Count % 2 != 0);
 
         // A basic glyph's redirect files it under another word while the game starts, so it must
         // name a word, or be one of the game's own non-word redirect values.
