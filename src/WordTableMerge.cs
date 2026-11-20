@@ -91,13 +91,16 @@ namespace ContentPacks
         private bool modified;
         private readonly HashSet<Row> warnedCode = new HashSet<Row>();
         private readonly HashSet<Row> warnedOdd = new HashSet<Row>();
+        // The game's own rows by word, aligned to this table's columns.
+        private readonly Dictionary<string, string[]> stockRows = new Dictionary<string, string[]>();
+        // Each word's dictionary categories in the game's own table.
+        private Dictionary<string, List<string>> stockCategories;
 
         private WordTableMerge(WordTable table, WordTable stock, IDictionary<string, string> textfiles)
         {
             this.table = table;
             cols = table.Columns;
             this.textfiles = textfiles;
-            var stockRows = new Dictionary<string, string[]>();
             foreach (var cells in stock?.Rows ?? new List<string[]>())
             {
                 // The game's header and this one may order columns differently.
@@ -362,6 +365,7 @@ namespace ContentPacks
             bool changed;
             // Rows may have changed since the last call, as merges do.
             categoryLoops = null;
+            categoryGaps = null;
             do
             {
                 changed = false;
@@ -379,6 +383,7 @@ namespace ContentPacks
                     changed = true;
                     undone = true;
                     categoryLoops = null;
+                    categoryGaps = null;
                     var before = row.Changes.Pop();
                     row.Cells = before.Cells;
                     row.Removed = before.Removed;
@@ -508,6 +513,10 @@ namespace ContentPacks
                     return "a dictionary category's word can't be marked as no word";
                 }
             }
+            if (CategoryGaps().TryGetValue(row, out var gap))
+            {
+                return gap;
+            }
             return null;
         }
 
@@ -548,6 +557,12 @@ namespace ContentPacks
         private string RemovalProblem(Row row)
         {
             var word = row.Word;
+            // The dictionary page lists every one of these categories, and fails to draw without
+            // the word.
+            if (Global.category_list != null && Global.category_list.Contains(word))
+            {
+                return "a dictionary category's word can't be removed";
+            }
             var users = index.Values.Count(r => !r.Removed && r != row
                 && (r.Cells[cols.Part1Col] == word || r.Cells[cols.Part2Col] == word
                     || (r.Cells[cols.RedirectCol] == word && KindOf(r.Cells[cols.StructCol]) == Kind.Strokes)
@@ -697,6 +712,250 @@ namespace ContentPacks
                 return part == category;
             }
             return index.TryGetValue(part, out var r) && !r.Removed && HasCategory(r, category, memo);
+        }
+
+        // The game's no-word marker. Global.Init gives a word with it as its redirect or first
+        // word type, or a renamed word, only that category, and drops categories whose word has
+        // it as its redirect.
+        private const string NoWord = "token";
+        private static readonly string[] TypeCategories = { "changeword", "linkword" };
+
+        // Rows whose latest change leaves a word with no dictionary category, or a dictionary
+        // category with no word, with the reason. Global.Init files each word under categories
+        // the way Categories works it out. The dictionary page fails to draw while a word with
+        // none is shown, and the dictionary page and note editor fail to open while a category
+        // in Global.category_list is empty. A changed row is blamed for its own loss; a loss in
+        // one of the game's own rows blames the changed rows its categories come from. Built when
+        // first needed after any row changes.
+        private Dictionary<Row, string> categoryGaps;
+
+        private Dictionary<Row, string> CategoryGaps()
+        {
+            if (categoryGaps != null)
+            {
+                return categoryGaps;
+            }
+            categoryGaps = new Dictionary<Row, string>();
+            if (Global.category_list == null)
+            {
+                return categoryGaps;
+            }
+            if (stockCategories == null)
+            {
+                stockCategories = Categories(w => stockRows.TryGetValue(w, out var c) ? c : null, stockRows.Keys);
+            }
+            var live = index.Values.Where(r => !r.Removed).ToList();
+            var now = Categories(w => index.TryGetValue(w, out var r) && !r.Removed ? r.Cells : null, live.Select(r => r.Word));
+            void Blame(Row source, string reason)
+            {
+                var blamed = !IsStock(source) ? new[] { source } : Sources(source).Where(r => !IsStock(r));
+                foreach (var r in blamed)
+                {
+                    if (!categoryGaps.ContainsKey(r))
+                    {
+                        categoryGaps[r] = reason;
+                    }
+                }
+            }
+            foreach (var row in live)
+            {
+                if (now[row.Word].Count == 0 && (!stockCategories.TryGetValue(row.Word, out var before) || before.Count > 0))
+                {
+                    Blame(row, "it leaves a word with no dictionary category, so the dictionary page fails to draw while that word is shown");
+                }
+            }
+            // UpdateDict reads each category from the first 10 of every word's categories.
+            var filled = new HashSet<string>(now.Values.SelectMany(c => c.Take(10)));
+            var filledBefore = new HashSet<string>(stockCategories.Values.SelectMany(c => c.Take(10)));
+            foreach (var category in Global.category_list)
+            {
+                if (category == NoWord || filled.Contains(category) || !filledBefore.Contains(category))
+                {
+                    continue;
+                }
+                const string reason = "it leaves a dictionary category with no words, so the dictionary page and the note editor fail to open";
+                if (index.TryGetValue(category, out var own) && !own.Removed && !IsStock(own))
+                {
+                    Blame(own, reason);
+                }
+                foreach (var row in live)
+                {
+                    if (stockCategories.TryGetValue(row.Word, out var had) && had.Take(10).Contains(category) && !now[row.Word].Take(10).Contains(category))
+                    {
+                        Blame(row, reason);
+                    }
+                }
+            }
+            return categoryGaps;
+        }
+
+        // The rows a row's categories come from, itself included, following its parts, a
+        // number's digit, and a basic glyph's redirect. The word of each category it has is
+        // among them, and can drop that category.
+        private IEnumerable<Row> Sources(Row start)
+        {
+            var seen = new HashSet<Row>();
+            var stack = new Stack<Row>();
+            stack.Push(start);
+            while (stack.Count > 0)
+            {
+                var r = stack.Pop();
+                if (!seen.Add(r))
+                {
+                    continue;
+                }
+                var names = new List<string>();
+                var kind = KindOf(r.Cells[cols.StructCol]);
+                switch (kind)
+                {
+                    case Kind.Strokes:
+                        names.Add(r.Cells[cols.RedirectCol]);
+                        break;
+                    case Kind.Number:
+                        names.Add(r.Word.Substring(0, 1));
+                        break;
+                    case Kind.OnePart:
+                        names.Add(r.Cells[cols.Part1Col]);
+                        break;
+                    case Kind.TwoParts:
+                        names.Add(r.Cells[cols.Part1Col]);
+                        names.Add(r.Cells[cols.Part2Col]);
+                        if (r.Cells[cols.StructCol] == "ud" && r.Cells[cols.Part1Col] == HandWord)
+                        {
+                            names.Add(MoveWord);
+                        }
+                        break;
+                }
+                foreach (var name in names)
+                {
+                    if (index.TryGetValue(name, out var next) && !next.Removed)
+                    {
+                        stack.Push(next);
+                    }
+                }
+            }
+            return seen;
+        }
+
+        // Each word's dictionary categories, as Global.Init and Search_Radicial work them out.
+        // cellsOf gives a word's row, or null for no word. A word that names no word where the
+        // game needs one, or is built from itself, fails other checks; here it just adds nothing.
+        private Dictionary<string, List<string>> Categories(Func<string, string[]> cellsOf, IEnumerable<string> words)
+        {
+            var depths = new Dictionary<string, Dictionary<string, int>>();
+            var visiting = new HashSet<string>();
+            Dictionary<string, int> Depths(string a)
+            {
+                if (depths.TryGetValue(a, out var known))
+                {
+                    return known;
+                }
+                var d = new Dictionary<string, int>();
+                var cells = cellsOf(a);
+                if (cells == null || !visiting.Add(a))
+                {
+                    return d;
+                }
+                var code = cells[cols.StructCol];
+                var p1 = cells[cols.Part1Col];
+                var p2 = cells[cols.Part2Col];
+                switch (KindOf(code))
+                {
+                    case Kind.Strokes:
+                        var redirect = cells[cols.RedirectCol];
+                        d[redirect != "" && redirect != NoWord ? redirect : a] = 0;
+                        break;
+                    case Kind.Number:
+                        d[a.Substring(0, 1)] = 0;
+                        break;
+                    case Kind.OnePart:
+                        if (Global.category_list.Contains(a))
+                        {
+                            d[a] = 0;
+                        }
+                        if (Global.category_list.Contains(p1))
+                        {
+                            d[p1] = 0;
+                        }
+                        else
+                        {
+                            foreach (var kv in Depths(p1))
+                            {
+                                d[kv.Key] = kv.Value;
+                            }
+                        }
+                        break;
+                    case Kind.TwoParts:
+                        if (Global.category_list.Contains(a))
+                        {
+                            d[a] = 0;
+                        }
+                        foreach (var item in new[] { p1, p2 })
+                        {
+                            if (item == "")
+                            {
+                                continue;
+                            }
+                            if (a != MoveWord && item == HandWord && code == "ud" && p1 == HandWord && p2 != HandWord)
+                            {
+                                if (!d.ContainsKey(MoveWord))
+                                {
+                                    d[MoveWord] = 1;
+                                }
+                                continue;
+                            }
+                            if (Global.category_list.Contains(item))
+                            {
+                                if (!d.ContainsKey(item))
+                                {
+                                    d[item] = 1;
+                                }
+                                continue;
+                            }
+                            foreach (var kv in Depths(item))
+                            {
+                                if (!d.TryGetValue(kv.Key, out var have) || kv.Value + 1 < have)
+                                {
+                                    d[kv.Key] = kv.Value + 1;
+                                }
+                            }
+                        }
+                        break;
+                }
+                visiting.Remove(a);
+                depths[a] = d;
+                return d;
+            }
+            string RenameOf(string w, string[] cells) => cells[cols.RenameCol].Trim() == "" ? w : cells[cols.RenameCol];
+            var result = new Dictionary<string, List<string>>();
+            foreach (var word in words)
+            {
+                var cells = cellsOf(word);
+                var types = Global.StringToListString(cells[cols.WordTypeCol]);
+                var firstType = types.Count > 0 ? types[0] : "";
+                var categories = new List<string>();
+                result[word] = categories;
+                if (cells[cols.RedirectCol] == NoWord || firstType == NoWord || RenameOf(word, cells) != word)
+                {
+                    categories.Add(NoWord);
+                    continue;
+                }
+                var d = Depths(word);
+                var nearest = d.Count == 0 ? 10000 : d.Values.Min();
+                foreach (var kv in d)
+                {
+                    var source = cellsOf(kv.Key);
+                    if (source != null && source[cols.RedirectCol] != NoWord && kv.Value <= nearest + 1)
+                    {
+                        categories.Add(RenameOf(kv.Key, source));
+                    }
+                }
+                if (TypeCategories.Contains(firstType))
+                {
+                    categories.Add(firstType);
+                }
+            }
+            return result;
         }
 
         // How many times a word appears in the game's text, other than the word table. The text is

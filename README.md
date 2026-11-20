@@ -182,7 +182,7 @@ This adds two nouns. `diameter` is a basic glyph, an octagon with a line through
 - The first line names the columns the file sets, using the names in the word table's own header row, case insensitive: `word`, `meaning`, `wordtype`, `redirect`, `struct`, `component1`, `component2`, `modifier`, and `rename`. Column order doesn't matter, except the first column must be `word`.
 - A later line that names columns as the first line does starts a new set of columns for the rows after it.
 - A row whose word exists overwrites the columns the file names and keeps the rest. A row with a new word adds it, with the other columns empty. A cell left empty sets that field to empty. To leave a field alone, leave its column out of the file. If different words have different column requirements, put them in separate files.
-- `!<word>` in the word column removes that row. A word that other rows use as a component, as a basic glyph's redirect, or as a number's digit can't be removed. Removing a word that the game's text still uses is logged as a warning.
+- `!<word>` in the word column removes that row. A dictionary category's word, or a word that other rows use as a component, as a basic glyph's redirect, or as a number's digit, can't be removed. Removing a word that the game's text still uses is logged as a warning.
 - Lines starting with `#` and blank lines are skipped. No cell can contain a comma.
 - The game removes every `:` from a row before reading it, so that fields like `1e1` can be stored as `:1e1` to prevent spreadsheet programs from mangling them. A `:` found not at the start of a word is logged as a warning.
 
@@ -198,9 +198,11 @@ After all merges, each added or changed row is checked. A row fails when:
 - its glyph is built from itself, through its components or a number word's digit, since the game stops loading on one;
 - it's a dictionary category's word built from one part, and that part falls under the same category, as through a basic glyph whose redirect names the word, since the game stops loading on one;
 - a basic glyph's redirect names no word, since the game stops loading on one;
+- it leaves a word in no dictionary category, as a compound built only from glyphs marked as no word does, since the dictionary page fails to draw while that word is shown;
+- it leaves one of the game's dictionary categories with no words, since the dictionary page and the note editor then fail to open;
 - it's a number word whose name isn't a digit, `e`, and a place, like `5e2`, or whose digit names no word, since the game stops loading on one.
 
-When a row fails, the change that made it fail is undone: the row keeps its definition from before that line, and a new row that fails is dropped. These checks are applied repeatedly, because one failed row could cause other rows to fail. Rows changed by a replaced or patched `newalien` file are checked the same way, against the game's own rows, before any merge applies. The table is read as the game reads it: header names must match exactly, rows with an empty word are skipped, and a row with fewer cells than the header fails. When a replaced or patched table has several rows for one word, the game uses the last, in the place of the first. Content Packs does the same, and logs a warning for each earlier row it drops, so merges and `!<word>` act on the row the game uses.
+When a row fails, the change that made it fail is undone: the row keeps its definition from before that line, and a new row that fails is dropped. When a category is lost from one of the game's own rows, the changes to the rows its categories come from are undone instead. These checks are applied repeatedly, because one failed row could cause other rows to fail. Rows changed by a replaced or patched `newalien` file are checked the same way, against the game's own rows, before any merge applies. The table is read as the game reads it: header names must match exactly, rows with an empty word are skipped, and a row with fewer cells than the header fails. When a replaced or patched table has several rows for one word, the game uses the last, in the place of the first. Content Packs does the same, and logs a warning for each earlier row it drops, so merges and `!<word>` act on the row the game uses.
 
 New words, and words whose shape changed, get new sprites. See [Glyph sprites](#glyph-sprites).
 
