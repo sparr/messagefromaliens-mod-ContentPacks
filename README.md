@@ -285,13 +285,13 @@ The `modifier` field is a string of characters, each setting one option. Most ap
 The game draws each stock glyph from a sprite baked from the word's strokes when the game was built. After the game loads, the plugin draws new sprites for:
 - words the packs added;
 - words whose structure code, components, or modifier the packs changed;
-- words built from either of those, at any depth.
+- words built from either of those, at any depth, including number words built from a digit.
 
 A `solid` word isn't drawn. It's shown with the game's own sprite for its one `solid` word, a filled, half-transparent cell. See [Basic glyphs](#basic-glyphs).
 
 A word with a stroke list that produces no drawing will use its original sprite if available, or the stock fallback sprite otherwise.
 
-A number word like `5e2` is drawn from its digit's glyph by name, not through its components. A change to a digit's glyph doesn't redraw its number words, which keep their stock sprites.
+A number word like `5e2` is drawn from its digit's glyph by name, not through its components, and gets a new sprite when its digit's glyph changes.
 
 ## Patches
 

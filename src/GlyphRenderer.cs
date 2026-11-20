@@ -178,7 +178,7 @@ namespace ContentPacks
             var users = new Dictionary<string, List<string>>();
             foreach (var kv in after)
             {
-                foreach (var part in new[] { kv.Value.Part1, kv.Value.Part2 })
+                foreach (var part in DrawnFrom(kv.Key, kv.Value))
                 {
                     if (part.Length > 0 && part != kv.Key && after.ContainsKey(part))
                     {
@@ -223,6 +223,25 @@ namespace ContentPacks
             }
             return result;
         }
+
+        // The words a word's glyph is drawn from: its components, or for a number word, the word
+        // named by the part before its e, as Global.StringToCharacter draws it.
+        private static IEnumerable<string> DrawnFrom(string word, ShapeColumns shape)
+        {
+            if (shape.Struct == NumberCode)
+            {
+                var halves = word.Split('e');
+                if (halves.Length == 2 && int.TryParse(halves[1], out _))
+                {
+                    yield return halves[0];
+                }
+                yield break;
+            }
+            yield return shape.Part1;
+            yield return shape.Part2;
+        }
+
+        private const string NumberCode = "exp";
 
         // The columns that set a word's shape.
         private struct ShapeColumns
