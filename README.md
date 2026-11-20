@@ -200,7 +200,7 @@ After all merges, each added or changed row is checked. A row fails when:
 - a basic glyph's redirect names no word, since the game stops loading on one;
 - it's a number word whose name isn't a digit, `e`, and a place, like `5e2`, or whose digit names no word, since the game stops loading on one.
 
-When a row fails, the change that made it fail is undone: the row keeps its definition from before that line, and a new row that fails is dropped. These checks are applied repeatedly, because one failed row could cause other rows to fail. Rows changed by a replaced or patched `newalien` file are checked the same way, against the game's own rows, before any merge applies. The table is read as the game reads it: header names must match exactly, rows with an empty word are skipped, and a row with fewer cells than the header fails.
+When a row fails, the change that made it fail is undone: the row keeps its definition from before that line, and a new row that fails is dropped. These checks are applied repeatedly, because one failed row could cause other rows to fail. Rows changed by a replaced or patched `newalien` file are checked the same way, against the game's own rows, before any merge applies. The table is read as the game reads it: header names must match exactly, rows with an empty word are skipped, and a row with fewer cells than the header fails. When a replaced or patched table has several rows for one word, the game uses the last, in the place of the first. Content Packs does the same, and logs a warning for each earlier row it drops, so merges and `!<word>` act on the row the game uses.
 
 New words, and words whose shape changed, get new sprites. See [Glyph sprites](#glyph-sprites).
 

@@ -5,7 +5,8 @@ namespace ContentPacks
 {
     // The word table, parsed the way the game reads it: lines split on CR and LF with empty ones
     // dropped, every ':' removed from a row, rows split on commas, columns found by their exact
-    // header names, and rows with an empty word skipped.
+    // header names, rows with an empty word skipped, and a word's last row taking effect at the
+    // place of its first.
     internal sealed class WordTable
     {
         // The header row as written, and split into names.
@@ -19,6 +20,9 @@ namespace ContentPacks
         internal readonly HashSet<string[]> Short;
         // The line ending the table uses.
         internal readonly string Newline;
+        // Line numbers of rows dropped because a later row has the same word, each with the line
+        // of the row that took its place.
+        internal readonly List<(int Dropped, int Kept)> Duplicates = new List<(int, int)>();
 
         private WordTable(string headerLine, string[] header, WordTableColumns columns, List<string[]> rows, HashSet<string[]> shortRows, string newline)
         {
@@ -34,13 +38,22 @@ namespace ContentPacks
         internal static WordTable Parse(string text, out string problem)
         {
             problem = null;
-            var lines = text.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-            if (lines.Length == 0)
+            // Each nonempty line with its line number, counting LF line ends.
+            var lines = new List<(string Text, int Number)>();
+            var physical = text.Split('\n');
+            for (var n = 0; n < physical.Length; n++)
+            {
+                foreach (var part in physical[n].Split(new[] { '\r' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    lines.Add((part, n + 1));
+                }
+            }
+            if (lines.Count == 0)
             {
                 problem = "the word table is empty";
                 return null;
             }
-            var header = lines[0].Split(',');
+            var header = lines[0].Text.Split(',');
             var columns = WordTableColumns.From(header, out var missing);
             if (columns == null)
             {
@@ -49,9 +62,12 @@ namespace ContentPacks
             }
             var rows = new List<string[]>();
             var shortRows = new HashSet<string[]>();
-            for (var i = 1; i < lines.Length; i++)
+            // The game keeps rows by word, so a later row replaces an earlier one in its place.
+            var byWord = new Dictionary<string, (int Index, int Line)>();
+            var duplicates = new List<(int, int)>();
+            for (var i = 1; i < lines.Count; i++)
             {
-                var cells = StripColons(lines[i]).Split(',');
+                var cells = StripColons(lines[i].Text).Split(',');
                 var isShort = cells.Length < header.Length;
                 if (isShort)
                 {
@@ -68,9 +84,24 @@ namespace ContentPacks
                     // The game skips a row with an empty word.
                     continue;
                 }
+                var word = cells[columns.WordCol];
+                if (word != "" && byWord.TryGetValue(word, out var earlier))
+                {
+                    shortRows.Remove(rows[earlier.Index]);
+                    rows[earlier.Index] = cells;
+                    duplicates.Add((earlier.Line, lines[i].Number));
+                    byWord[word] = (earlier.Index, lines[i].Number);
+                    continue;
+                }
+                if (word != "")
+                {
+                    byWord[word] = (rows.Count, lines[i].Number);
+                }
                 rows.Add(cells);
             }
-            return new WordTable(lines[0], header, columns, rows, shortRows, text.Contains("\r\n") ? "\r\n" : "\n");
+            var table = new WordTable(lines[0].Text, header, columns, rows, shortRows, text.Contains("\r\n") ? "\r\n" : "\n");
+            table.Duplicates.AddRange(duplicates);
+            return table;
         }
 
         // The game removes every ':' from a row before reading it. Its own table puts one before

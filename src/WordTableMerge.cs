@@ -153,8 +153,15 @@ namespace ContentPacks
                 Log.Error($"{Target}: {problem}; the game's own word table is used");
                 return stockText ?? text;
             }
+            foreach (var (dropped, kept) in table.Duplicates)
+            {
+                Log.Warning($"{TableLabel}: line {dropped} is dropped, because line {kept} has the same word and the game uses only the last row for a word");
+            }
             var stock = stockText == null ? null : WordTable.Parse(stockText, out _);
-            return new WordTableMerge(table, stock, textfiles).Run(text, files);
+            var merge = new WordTableMerge(table, stock, textfiles);
+            // The table is written back without the dropped rows.
+            merge.modified = table.Duplicates.Count > 0;
+            return merge.Run(text, files);
         }
 
         private string Run(string text, IList<(string Label, string Path)> files)
