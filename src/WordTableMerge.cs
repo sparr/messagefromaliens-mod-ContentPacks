@@ -413,13 +413,11 @@ namespace ContentPacks
                 return "it has no word type";
             }
             var code = row.Cells[cols.StructCol];
-            if (code.Trim().Length == 0)
-            {
-                return "it has no structure code";
-            }
             if (!Kinds.ContainsKey(code) && warnedCode.Add(row))
             {
-                Log.Warning($"{row.Origin}: the game doesn't know this structure code, so it draws the word as a basic glyph");
+                Log.Warning(code.Trim().Length == 0
+                    ? $"{row.Origin}: it has no structure code, so the game draws the word as a basic glyph"
+                    : $"{row.Origin}: the game doesn't know this structure code, so it draws the word as a basic glyph");
             }
             var p1 = row.Cells[cols.Part1Col];
             var p2 = row.Cells[cols.Part2Col];
@@ -484,20 +482,13 @@ namespace ContentPacks
             return null;
         }
 
-        // The game draws an empty first component as a default stroke, so empty is allowed.
+        // The game draws an empty first component as a default stroke, so empty is allowed. An
+        // empty stroke, as a trailing ; makes, is a path with no points, which draws nothing.
         private static string StrokeProblem(string s)
         {
-            if (s.Length == 0)
-            {
-                return null;
-            }
             foreach (var stroke in s.Split(';'))
             {
                 var nums = stroke.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                if (nums.Length == 0)
-                {
-                    return "a stroke is empty";
-                }
                 if (!nums.All(n => Number.IsMatch(n) && float.TryParse(n, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out _)))
                 {
                     return "a stroke holds something other than numbers";

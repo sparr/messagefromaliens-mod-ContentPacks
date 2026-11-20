@@ -299,6 +299,9 @@ namespace ContentPacks
                 else
                 {
                     var strokes = Global.StringToCharacter(word);
+                    // An empty stroke draws nothing, but DrawPath1 draws nothing at all when the
+                    // first one is empty.
+                    strokes.RemoveAll(path => path.Count == 0);
                     var count = CountSegments(strokes);
                     if (count == 0)
                     {

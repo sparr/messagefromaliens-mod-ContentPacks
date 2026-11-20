@@ -189,11 +189,11 @@ This adds two nouns. `diameter` is a basic glyph, an octagon with a line through
 The `struct`, `component1`, `component2`, and `modifier` columns set the word's glyph. See [Glyph structure](#glyph-structure).
 
 After all merges, each added or changed row is checked. A row fails when:
-- it has no word type or no structure code, since the game stops loading on a word with no word type;
+- it has no word type, since the game stops loading on one;
 - its meaning or word type has a token the game can't read;
 - it's a dictionary category's word, and it's renamed or marked as no word;
 - a component that must be a word names no word;
-- a basic glyph's strokes hold anything but numbers, or an empty or odd-length path;
+- a basic glyph's strokes hold anything but numbers, or a path with an odd count of numbers;
 - its glyph is built from itself, through its components or a number word's digit, since the game stops loading on one;
 - it's a dictionary category's word built from one part, and that part falls under the same category, as through a basic glyph whose redirect names the word, since the game stops loading on one;
 - a basic glyph's redirect names no word, since the game stops loading on one;
@@ -205,7 +205,7 @@ New words, and words whose shape changed, get new sprites. See [Glyph sprites](#
 
 #### Glyph structure
 
-A word's glyph comes from four columns of its row. `struct` is a code that says how the glyph is built. `component1` and `component2` hold its strokes or name its parts. `modifier` adjusts the layout. Parts are other words, so glyphs nest: the game builds each part's glyph first, then arranges the parts.
+A word's glyph comes from four columns of its row. `struct` is a code that says how the glyph is built. `component1` and `component2` hold its strokes or name its parts. `modifier` adjusts the layout. Parts are other words, so glyphs nest: the game builds each part's glyph first, then arranges the parts. The game draws a word whose `struct` is empty or a code not listed below as a basic glyph, and Content Packs logs a warning for it.
 
 ##### Basic glyphs
 
@@ -214,7 +214,7 @@ A word's glyph comes from four columns of its row. `struct` is a code that says 
 | `s` | `component1` is the glyph's strokes. `component2` is empty. |
 | `solid` | same as `s` inside a compound glyph, otherwise ignored |
 
-Strokes are paths separated by `;`. Each path is a list of numbers read as x y pairs and drawn as straight lines from point to point, so a closed shape repeats its first point. x grows to the right and y grows upward. The game's glyphs keep to a half-unit grid, mostly within -3 to 3. The glyph is centered on its bounding box. Drawn alone, it's scaled down to fit its box if it's larger, as every glyph on that grid is. Inside other glyphs, parts are always rescaled, so only proportions matter there. An empty `component1` draws the game's default, a single diagonal stroke. Every glyph is drawn with the same line width, whatever its size.
+Strokes are paths separated by `;`. Each path is a list of numbers read as x y pairs and drawn as straight lines from point to point, so a closed shape repeats its first point. x grows to the right and y grows upward. The game's glyphs keep to a half-unit grid, mostly within -3 to 3. The glyph is centered on its bounding box. Drawn alone, it's scaled down to fit its box if it's larger, as every glyph on that grid is. Inside other glyphs, parts are always rescaled, so only proportions matter there. An empty `component1` draws the game's default, a single diagonal stroke. An empty path, as a trailing `;` makes, draws nothing. Every glyph is drawn with the same line width, whatever its size.
 
 One game word uses `solid`, the notebook's cursor marker, which has a sprite that is usually never seen. Content Packs draws `solid` words using that sprite when they stand alone, or draws their strokes when they are inside a compound glyph.
 
