@@ -32,7 +32,7 @@ namespace ContentPacks
             DumpGameText = Config.Bind("Content", "DumpGameText", false,
                 Described("Write the game's decrypted text files to BepInEx/content/_dump/TxtData/ at startup.", "write game de message"));
             EnforcePatchContext = Config.Bind("Content", "EnforcePatchContext", false,
-                Described("Place each patch hunk only where all its context lines match. When off, a hunk that changes lines is placed by its removed lines alone, and its context only chooses between several matches. Takes effect at the next launch.", "near wordline can same"));
+                Described("Place each patch hunk only where all its context lines match. When off, a hunk that removes lines is placed by its removed lines alone, and one that only adds lines is placed where the most of its context lines match. Takes effect at the next launch.", "near wordline can same"));
 
             new Harmony(Guid).PatchAll(typeof(Plugin).Assembly);
             Log.LogInfo($"{Name} {Version} loaded");

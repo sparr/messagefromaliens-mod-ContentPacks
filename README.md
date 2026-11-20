@@ -164,7 +164,7 @@ New chapters can't award achievements.
 
 ### Text patches
 
-A `.patch` file is a unified diff of one file, as made by `diff -u` or `git diff`. Its file names are not used. Hunks apply in order, each to the result of the ones before it. If any hunk fails, the whole patch is skipped. Hunk line numbers are never enforced, and context lines are only enforced if [`EnforcePatchContext`](#configuration) is enabled or the hunk only adds lines with no removals. A hunk with no context or removed lines, as `diff -U0` writes an insertion, is placed by its line number alone. A hunk whose context holds the `#` title of the page it changes is placed only within that page, since the game's files repeat lines across pages. When a hunk matches several places, a place where its context matches too wins first, then the one where the most context lines match, then the one nearest its header's line number.
+A `.patch` file is a unified diff of one file, as made by `diff -u` or `git diff`. Its file names are not used. Hunks apply in order, each to the result of the ones before it. If any hunk fails, the whole patch is skipped. Hunk line numbers are never enforced, and context lines are only enforced if [`EnforcePatchContext`](#configuration) is enabled. That is a player's setting, which applies to every pack's patches; a pack can't turn it on for its own. When it's off, a hunk that removes lines is placed by its removed lines, and a hunk that only adds lines is placed where all its context lines match, or else where the most of them match. A hunk with no context or removed lines, as `diff -U0` writes an insertion, is placed by its line number alone. A hunk whose context holds the `#` title of the page it changes is placed only within that page, since the game's files repeat lines across pages. When a hunk matches several places, a place where its context matches too wins first, then the one where the most context lines match, then the one nearest its header's line number.
 
 ### Word table merges
 
@@ -307,7 +307,7 @@ A number word like `5e2` is drawn from its digit's glyph by name, not through it
 | Key | Default | Effect |
 |---|---|---|
 | `Content.LoadContentPacks` | `true` | Load content packs from `BepInEx/content/`. Takes effect at the next launch. |
-| `Content.EnforcePatchContext` | `false` | Place each patch hunk only where all its context lines match. When off, a hunk that changes lines is placed by its removed lines alone. Takes effect at the next launch. |
+| `Content.EnforcePatchContext` | `false` | Place each patch hunk only where all its context lines match. When off, a hunk that removes lines is placed by its removed lines alone, and one that only adds lines is placed where the most of its context lines match. Takes effect at the next launch. |
 | `Content.DumpGameText` | `false` | Write the stock game text files to `BepInEx/content/_dump/TxtData/` at startup. |
 | `Packs.<pack>` | `true` | Load the content pack in `BepInEx/content/<pack>/`. Added for each pack when it's found. Takes effect at the next launch. |
 

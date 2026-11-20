@@ -13,7 +13,8 @@ namespace ContentPacks
     // With enforceContext, a hunk is placed where its old text (context and removed lines)
     // matches. Without it, a hunk that removes lines is placed by its removed lines alone: its
     // context lines match any line, and the file's own lines are kept there. A hunk that only
-    // inserts lines is always placed by its context.
+    // inserts lines is placed where all its context matches, or failing that, where the most of
+    // its context lines match, then nearest the line its header names.
     //
     // When a hunk matches several places, without enforceContext a place where its context matches
     // too wins first, then the place where the most of its context lines match, since the game's
@@ -230,7 +231,17 @@ namespace ContentPacks
             var exact = FindAll(lines, old, null);
             List<int> matches;
             var loose = !enforceContext && h.Ops.Contains('-');
-            if (!loose)
+            // The context lines before the hunk's first added or removed line.
+            var before = h.Ops.TakeWhile(op => op == ' ').Count();
+            // Without enforceContext, an insertion whose context matches nowhere in full goes
+            // where the most of its context lines match.
+            var fuzzy = !enforceContext && !loose && exact.Count == 0;
+            if (fuzzy)
+            {
+                // Every place the insertion can go, from the file's start to its end.
+                matches = Enumerable.Range(-before, lines.Count + 1).Where(m => ContextScore(lines, old, oldIsContext, m) > 0).ToList();
+            }
+            else if (!loose)
             {
                 matches = exact;
             }
@@ -250,8 +261,6 @@ namespace ContentPacks
             }
             // A hunk whose context holds its page's title line edits only that page. The game's
             // files repeat lines across pages, so the same lines elsewhere are another page's.
-            // The context lines before the hunk's first added or removed line.
-            var before = h.Ops.TakeWhile(op => op == ' ').Count();
             var title = PageTitle(old, before);
             if (title != null)
             {
@@ -264,7 +273,21 @@ namespace ContentPacks
                 }
                 matches = onPage;
             }
-            if (matches.Count > 1)
+            if (fuzzy)
+            {
+                var scores = matches.ToDictionary(m => m, m => ContextScore(lines, old, oldIsContext, m));
+                var best = scores.Values.Max();
+                matches = matches.Where(m => scores[m] == best).ToList();
+                var nearest = matches.Min(m => Math.Abs(m - expected));
+                matches = matches.Where(m => Math.Abs(m - expected) == nearest).ToList();
+                if (matches.Count > 1)
+                {
+                    Log.Error($"{where}:{h.PatchLine}: hunk {h.Number}'s context matches nowhere in full, and {matches.Count} places where {best} of its {old.Count} context lines match are equally near line {expected + 1}; add context lines that tell them apart");
+                    return false;
+                }
+                Log.Info($"{where}:{h.PatchLine}: hunk {h.Number}'s context matches nowhere in full; placed at line {matches[0] + before + 1}, where {best} of its {old.Count} context lines match");
+            }
+            else if (matches.Count > 1)
             {
                 var places = matches.Count;
                 // A place where the whole hunk matches, context included, wins over the rest.
