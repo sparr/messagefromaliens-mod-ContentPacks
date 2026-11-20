@@ -189,6 +189,7 @@ This adds two nouns. `diameter` is a basic glyph, an octagon with a line through
 The `struct`, `component1`, `component2`, and `modifier` columns set the word's glyph. See [Glyph structure](#glyph-structure).
 
 After all merges, each added or changed row is checked. A row fails when:
+- it's a new word that ends in `e0` or contains `;`, `<`, or `>`, which the game changes wherever its text names the word;
 - it has no word type, since the game stops loading on one;
 - its meaning or word type has a token the game can't read;
 - it's a dictionary category's word, and it's renamed or marked as no word;

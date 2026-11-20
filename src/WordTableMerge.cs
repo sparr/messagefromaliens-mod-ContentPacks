@@ -51,6 +51,8 @@ namespace ContentPacks
         // A number word: a digit at a place, like 5e2.
         private static readonly Regex NumberWord = new Regex(@"^[0-9]+e-?[0-9]+$");
 
+        private static readonly char[] AlteredChars = { ';', '<', '>' };
+
         private const string TableLabel = Target + " as the packs replaced or patched it";
 
         private sealed class State
@@ -401,6 +403,12 @@ namespace ContentPacks
                 return "it has fewer cells than the header, which stops the game while it loads";
             }
             var word = row.Cells[cols.WordCol];
+            // Page text can't name such a word: Draw.Write drops an e0 from the end of each token,
+            // and the game's tokenizer removes < and >, and splits sentences at ;.
+            if (row.Stock == null && (word.EndsWith("e0") || word.IndexOfAny(AlteredChars) >= 0))
+            {
+                return "the game changes a word that ends in e0 or contains ;, <, or > wherever its text names it";
+            }
             // The game reads every word's meaning and word types with its tokenizer, and its first
             // word type while it starts, and stops loading when either fails.
             var problem = GameParse.Problem(row.Cells[cols.MeaningCol]) ?? GameParse.Problem(row.Cells[cols.WordTypeCol]);
