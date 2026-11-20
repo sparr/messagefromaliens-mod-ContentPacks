@@ -341,6 +341,8 @@ namespace ContentPacks
         {
             var undone = false;
             bool changed;
+            // Rows may have changed since the last call, as merges do.
+            categoryLoops = null;
             do
             {
                 changed = false;
@@ -357,6 +359,7 @@ namespace ContentPacks
                     }
                     changed = true;
                     undone = true;
+                    categoryLoops = null;
                     var before = row.Changes.Pop();
                     row.Cells = before.Cells;
                     row.Removed = before.Removed;
@@ -455,9 +458,13 @@ namespace ContentPacks
                     }
                     break;
             }
-            if ((kind == Kind.TwoParts || kind == Kind.OnePart) && InCycle(row))
+            if (kind != Kind.Strokes && InCycle(row))
             {
-                return "its components contain the word itself";
+                return "its glyph is built from itself, through its components or a number's digit, which stops the game while it loads";
+            }
+            if (CategoryLoops().Contains(row))
+            {
+                return "it files a one-part dictionary category's word under that same category twice, which stops the game while it loads";
             }
             // The dictionary page files every word under the game's categories by these words'
             // names; it fails to draw if one is renamed or marked as no word.
@@ -558,6 +565,8 @@ namespace ContentPacks
             return false;
         }
 
+        // The words a word's glyph is drawn from: its components, or a number word's digits, which
+        // StringToCharacter draws from the word named by the part before the e.
         private IEnumerable<Row> Parts(Row r)
         {
             var kind = KindOf(r.Cells[cols.StructCol]);
@@ -569,6 +578,105 @@ namespace ContentPacks
             {
                 yield return b;
             }
+            if (kind == Kind.Number)
+            {
+                var halves = r.Cells[cols.WordCol].Split('e');
+                if (halves.Length == 2 && int.TryParse(halves[1], out _) && index.TryGetValue(halves[0], out var digit) && !digit.Removed)
+                {
+                    yield return digit;
+                }
+            }
+        }
+
+        // Rows that make Global.Search_Radicial add a key twice, which throws while the game
+        // loads. It files a dictionary category's word under itself first, and a one-part word
+        // then gets every category its part has. So a one-part category word whose part, not a
+        // category word itself, has that word among its categories stops the game. The part gets
+        // it from a basic glyph whose redirect names the word, or from the game's one special
+        // case for an up-down compound on the hand word. Holds the category word, and when it is
+        // the game's own row, every row on the way to the source. Built when first needed after
+        // any row changes.
+        private HashSet<Row> categoryLoops;
+
+        private const string MoveWord = "move";
+        private const string HandWord = "hand";
+
+        private HashSet<Row> CategoryLoops()
+        {
+            if (categoryLoops != null)
+            {
+                return categoryLoops;
+            }
+            categoryLoops = new HashSet<Row>();
+            if (Global.category_list == null)
+            {
+                return categoryLoops;
+            }
+            foreach (var row in index.Values)
+            {
+                if (row.Removed || KindOf(row.Cells[cols.StructCol]) != Kind.OnePart || !Global.category_list.Contains(row.Word)
+                    || !index.TryGetValue(row.Cells[cols.Part1Col], out var part) || part.Removed || Global.category_list.Contains(part.Word))
+                {
+                    continue;
+                }
+                var memo = new Dictionary<Row, bool>();
+                if (HasCategory(part, row.Word, memo))
+                {
+                    // The category word's own change is blamed first, when it has one.
+                    categoryLoops.Add(row);
+                    if (IsStock(row))
+                    {
+                        categoryLoops.UnionWith(memo.Where(kv => kv.Value).Select(kv => kv.Key));
+                    }
+                }
+            }
+            return categoryLoops;
+        }
+
+        // Whether Search_Radicial gives a word that isn't a category word the category named
+        // category, following its parts as the game does. memo records each row visited.
+        private bool HasCategory(Row r, string category, Dictionary<Row, bool> memo)
+        {
+            if (memo.TryGetValue(r, out var known))
+            {
+                return known;
+            }
+            // A cycle of components, which another check rejects.
+            memo[r] = false;
+            var found = false;
+            var word = r.Word;
+            var p1 = r.Cells[cols.Part1Col];
+            var p2 = r.Cells[cols.Part2Col];
+            switch (KindOf(r.Cells[cols.StructCol]))
+            {
+                case Kind.Strokes:
+                    var redirect = r.Cells[cols.RedirectCol];
+                    found = (redirect.Length > 0 && !redirectMarkers.Contains(redirect) ? redirect : word) == category;
+                    break;
+                case Kind.Number:
+                    found = word.Substring(0, 1) == category;
+                    break;
+                case Kind.OnePart:
+                    found = PartHasCategory(p1, category, memo);
+                    break;
+                case Kind.TwoParts:
+                    var moveCase = word != MoveWord && r.Cells[cols.StructCol] == "ud" && p1 == HandWord && p2 != HandWord;
+                    found = (moveCase ? MoveWord == category : PartHasCategory(p1, category, memo))
+                        || PartHasCategory(p2, category, memo);
+                    break;
+            }
+            memo[r] = found;
+            return found;
+        }
+
+        // A part that is a category word gives only itself; any other gives its own categories.
+        private bool PartHasCategory(string part, string category, Dictionary<Row, bool> memo)
+        {
+            if (Global.category_list.Contains(part))
+            {
+                return part == category;
+            }
+            return index.TryGetValue(part, out var r) && !r.Removed && HasCategory(r, category, memo);
         }
 
         // How many times a word appears in the game's text, other than the word table. The text is

@@ -194,7 +194,8 @@ After all merges, each added or changed row is checked. A row fails when:
 - it's a dictionary category's word, and it's renamed or marked as no word;
 - a component that must be a word names no word;
 - a basic glyph's strokes hold anything but numbers, or an empty or odd-length path;
-- its components lead back to the word itself;
+- its glyph is built from itself, through its components or a number word's digit, since the game stops loading on one;
+- it's a dictionary category's word built from one part, and that part falls under the same category, as through a basic glyph whose redirect names the word, since the game stops loading on one;
 - a basic glyph's redirect names no word, since the game stops loading on one;
 - it's a number word whose name isn't a digit, `e`, and a place, like `5e2`, or whose digit names no word, since the game stops loading on one.
 
