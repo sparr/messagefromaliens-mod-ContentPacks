@@ -42,18 +42,48 @@ namespace ContentPacks
                     Plugin.Log.LogError($"Dumping the game's text failed: {e.Message}");
                 }
             }
+            if (!Plugin.LoadContentPacks.Value)
+            {
+                return;
+            }
+            // Global.Init decrypts the game's text again each time it runs, as when the scene
+            // reloads, so the packs' result from the first run is put back each time.
+            if (result != null)
+            {
+                Replay(textfiles);
+                return;
+            }
+            var before = new Dictionary<string, string>(textfiles);
             try
             {
-                if (Plugin.LoadContentPacks.Value)
-                {
-                    textfiles.TryGetValue(WordTableMerge.Target, out GlyphRenderer.OriginalTable);
-                    Apply(textfiles);
-                }
+                textfiles.TryGetValue(WordTableMerge.Target, out GlyphRenderer.OriginalTable);
+                Apply(textfiles);
             }
             catch (Exception e)
             {
                 Plugin.Log.LogError($"Content pack loading failed: {e}");
             }
+            result = textfiles.Where(kv => !before.TryGetValue(kv.Key, out var old) || old != kv.Value)
+                .ToDictionary(kv => kv.Key, kv => kv.Value);
+            dropped = before.Keys.Where(k => !textfiles.ContainsKey(k)).ToList();
+        }
+
+        // The files the packs added or changed, with their text, and the game's files they
+        // removed, from the first run.
+        private static Dictionary<string, string> result;
+        private static List<string> dropped;
+
+        private static void Replay(Dictionary<string, string> textfiles)
+        {
+            foreach (var kv in result)
+            {
+                textfiles[kv.Key] = kv.Value;
+            }
+            foreach (var key in dropped)
+            {
+                textfiles.Remove(key);
+            }
+            Log.Debug($"Content packs: {result.Count} changed files put back after the game reloaded its text");
         }
 
         private static void Dump(Dictionary<string, string> textfiles)
