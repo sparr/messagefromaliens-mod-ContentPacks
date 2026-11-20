@@ -164,6 +164,9 @@ namespace ContentPacks
                 modified |= Validate(touched.Distinct().ToList());
             }
             var fromTable = touched.Count;
+            // Each row's count of changes before the merges, to tell whether any merge change
+            // survives the checks.
+            var depth = rows.ToDictionary(r => r, r => r.Changes.Count);
             foreach (var (label, path) in files)
             {
                 try
@@ -177,11 +180,17 @@ namespace ContentPacks
             }
             if (touched.Count > fromTable)
             {
-                modified = true;
-                Validate(touched.Skip(fromTable).Distinct().ToList());
+                var merged = touched.Skip(fromTable).Distinct().ToList();
+                Validate(merged);
+                // Undoing pops the latest change first, so a row back at its count is as it was.
+                modified |= merged.Any(r => r.Changes.Count != (depth.TryGetValue(r, out var d) ? d : 0));
             }
             if (!modified)
             {
+                if (files.Count > 0)
+                {
+                    Log.Info($"{Target}: no merged row is in effect, so the table is unchanged");
+                }
                 return text;
             }
             Origins.Clear();
