@@ -90,6 +90,7 @@ namespace ContentPacks
         private Dictionary<string, int> textTokens;
         private bool modified;
         private readonly HashSet<Row> warnedCode = new HashSet<Row>();
+        private readonly HashSet<Row> warnedOdd = new HashSet<Row>();
 
         private WordTableMerge(WordTable table, WordTable stock, IDictionary<string, string> textfiles)
         {
@@ -459,6 +460,10 @@ namespace ContentPacks
                     {
                         return strokes;
                     }
+                    if (HasOddStroke(p1) && warnedOdd.Add(row))
+                    {
+                        Log.Warning($"{row.Origin}: a stroke has an odd count of numbers, so the game drops its last number");
+                    }
                     break;
                 case Kind.Number:
                     // The game draws a number word from its own name, and files it under the
@@ -510,13 +515,13 @@ namespace ContentPacks
                 {
                     return "a stroke holds something other than numbers";
                 }
-                if (nums.Length % 2 != 0)
-                {
-                    return "a stroke has an odd count of numbers";
-                }
             }
             return null;
         }
+
+        // The game reads a stroke's numbers in pairs and ignores a last one left over.
+        private static bool HasOddStroke(string s) =>
+            s.Split(';').Any(stroke => stroke.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries).Length % 2 != 0);
 
         // A basic glyph's redirect files it under another word while the game starts, so it must
         // name a word, or be one of the game's own non-word redirect values.
