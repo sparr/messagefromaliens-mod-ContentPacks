@@ -366,6 +366,7 @@ namespace ContentPacks
         {
             var undone = false;
             bool changed;
+            cycleRows = null;
             // Rows may have changed since the last call, as merges do.
             categoryLoops = null;
             categoryGaps = null;
@@ -385,6 +386,7 @@ namespace ContentPacks
                     }
                     changed = true;
                     undone = true;
+                    cycleRows = null;
                     categoryLoops = null;
                     categoryGaps = null;
                     var before = row.Changes.Pop();
@@ -588,31 +590,87 @@ namespace ContentPacks
         private bool Live(string word) =>
             index.TryGetValue(word, out var r) && !r.Removed;
 
-        private bool InCycle(Row start)
+        private bool InCycle(Row start) => CycleRows().Contains(start);
+
+        // Rows whose glyph is built from itself: those with a part that is the row itself, and
+        // those in a strongly connected component of more than one row in the graph of rows and
+        // their parts. Found with one pass of Tarjan's algorithm, iterative so that a long chain
+        // of words can't overflow the stack, in time linear in rows and parts. Built when first
+        // needed after any row changes.
+        private HashSet<Row> cycleRows;
+
+        private HashSet<Row> CycleRows()
         {
-            var seen = new HashSet<Row>();
-            var stack = new Stack<Row>();
-            foreach (var p in Parts(start))
+            if (cycleRows != null)
             {
-                stack.Push(p);
+                return cycleRows;
             }
-            while (stack.Count > 0)
+            cycleRows = new HashSet<Row>();
+            var order = new Dictionary<Row, int>();
+            var low = new Dictionary<Row, int>();
+            var open = new Stack<Row>();
+            var onOpen = new HashSet<Row>();
+            var work = new Stack<(Row Row, IEnumerator<Row> Parts)>();
+            void Enter(Row r)
             {
-                var r = stack.Pop();
-                if (r == start)
-                {
-                    return true;
-                }
-                if (!seen.Add(r))
+                order[r] = low[r] = order.Count;
+                open.Push(r);
+                onOpen.Add(r);
+                work.Push((r, Parts(r).GetEnumerator()));
+            }
+            foreach (var root in index.Values)
+            {
+                // A removed row is no row's part, so it is in no cycle.
+                if (root.Removed || order.ContainsKey(root))
                 {
                     continue;
                 }
-                foreach (var p in Parts(r))
+                Enter(root);
+                while (work.Count > 0)
                 {
-                    stack.Push(p);
+                    var (r, parts) = work.Peek();
+                    if (parts.MoveNext())
+                    {
+                        var p = parts.Current;
+                        if (p == r)
+                        {
+                            cycleRows.Add(r);
+                        }
+                        if (!order.ContainsKey(p))
+                        {
+                            Enter(p);
+                        }
+                        else if (onOpen.Contains(p))
+                        {
+                            low[r] = Math.Min(low[r], order[p]);
+                        }
+                        continue;
+                    }
+                    work.Pop();
+                    if (work.Count > 0)
+                    {
+                        var parent = work.Peek().Row;
+                        low[parent] = Math.Min(low[parent], low[r]);
+                    }
+                    if (low[r] == order[r])
+                    {
+                        var component = new List<Row>();
+                        Row member;
+                        do
+                        {
+                            member = open.Pop();
+                            onOpen.Remove(member);
+                            component.Add(member);
+                        }
+                        while (member != r);
+                        if (component.Count > 1)
+                        {
+                            cycleRows.UnionWith(component);
+                        }
+                    }
                 }
             }
-            return false;
+            return cycleRows;
         }
 
         // The words a word's glyph is drawn from: its components, or a number word's digits, which
