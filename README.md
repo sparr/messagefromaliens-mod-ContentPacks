@@ -327,7 +327,7 @@ Each setting is tagged with its name in glyphs, and the mod names itself in glyp
 dotnet build -c Release
 ```
 
-The build copies `ContentPacks.dll` to `<game>/BepInEx/plugins/ContentPacks/`, and the example pack from [`content/_circle-length/`](content/_circle-length/) to `<game>/BepInEx/content/_circle-length/`. Disable the copy with `-p:DeployToGame=false`.
+With `-p:DeployToGame=true`, the build also copies `ContentPacks.dll` to `<game>/BepInEx/plugins/ContentPacks/`, and the example pack from [`content/_circle-length/`](content/_circle-length/) to `<game>/BepInEx/content/_circle-length/`.
 
 The build looks for the game in `<SteamLibraryDir>/steamapps/common/Message From Aliens`. `SteamLibraryDir` comes from the first of these that is set:
 
