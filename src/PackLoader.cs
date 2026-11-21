@@ -132,6 +132,7 @@ namespace ContentPacks
             // merges see the files as all packs' replacements left them.
             var categories = Global.alien_message_category;
             var stock = new Dictionary<string, string>(textfiles);
+            var replaced = new HashSet<string>();
             foreach (var pack in packs)
             {
                 foreach (var (name, file) in pack.Replacements)
@@ -142,6 +143,7 @@ namespace ContentPacks
                         var key = GameKey(textfiles, name, pack.Name, file);
                         var isNew = !textfiles.ContainsKey(key);
                         textfiles[key] = text;
+                        replaced.Add(key);
 
                         // The game only parses text files named in alien_message_category,
                         // so a new file is registered as a new message category.
@@ -170,7 +172,8 @@ namespace ContentPacks
                             Log.Error($"{label}: skipped, because no game file or pack file is named {key}");
                             continue;
                         }
-                        var patched = TextPatcher.Apply(text, File.ReadAllText(file), label, Plugin.EnforcePatchContext.Value);
+                        var original = !replaced.Contains(k) && stock.TryGetValue(k, out var stockText) ? stockText : null;
+                        var patched = TextPatcher.Apply(text, File.ReadAllText(file), label, Plugin.EnforcePatchContext.Value, original);
                         if (patched != null)
                         {
                             textfiles[k] = patched;
