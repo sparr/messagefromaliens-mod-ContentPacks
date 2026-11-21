@@ -122,7 +122,7 @@ A quiz is a page with answer slots:
 - A line starting with `%` gives the correct answers, the glyphs that fill the slots in order. Multiple `%` lines are alternate solutions to the whole quiz. Each must fill the same number of slots as the first.
 - `?` in a line is an answer slot.
 
-Every quiz title in the game has the form `<words> riddle <n>`: `riddle` is the game's word for quiz, `<n>` is the quiz's number, and `<words>` names its chapter. A quiz's title must contain that word after a space: the game treats only such pages as quizzes, so on any other page a click on an answer slot looks the glyph up instead of filling the slot, and a title that starts with that word stops the game when the quiz is won. Count gates count pages by that title pattern. See [Count gates](#count-gates).
+Every quiz title in the game has the form `<words> quiz <n>`: here and below, `quiz` stands for the game's own word for quiz, the word before the number in every quiz title in the game text that [`DumpGameText`](#configuration) writes. `<n>` is the quiz's number, and `<words>` names its chapter. A quiz's title must contain `quiz` after a space: the game treats only such pages as quizzes, so on any other page a click on an answer slot looks the glyph up instead of filling the slot, and a title that starts with `quiz` stops the game when the quiz is won. Count gates count pages by that title pattern. See [Count gates](#count-gates).
 
 #### Menus
 
@@ -146,15 +146,15 @@ A menu draws the lines of won pages dimmed.
 
 ##### Count gates
 
-The game reads a gate as a count when it contains `riddle-` followed by a number. A count gate `[<words>-riddle-<n>]` passes once at least `<n>` won pages have titles starting with `<words> riddle`. It doesn't matter which pages they are, what kind of page, or in what order they were won.
+The game reads a gate as a count when it contains `quiz-` followed by a number. A count gate `[<words>-quiz-<n>]` passes once at least `<n>` won pages have titles starting with `<words> quiz`. It doesn't matter which pages they are, what kind of page, or in what order they were won.
 
-Every quiz title in the game has the form `<words> riddle <n>`, so in the game a count gate counts a chapter's quizzes: `[<chaptername>-riddle-5]` means any five of that chapter's quizzes, not its fifth.
+Every quiz title in the game has the form `<words> quiz <n>`, so in the game a count gate counts a chapter's quizzes: `[<chaptername>-quiz-5]` means any five of that chapter's quizzes, not its fifth.
 
 To use count gates in a pack:
 
-- Give the pages to be counted titles starting with the same words followed by `riddle`, as in `<words> riddle 1`, `<words> riddle 2`, etc. They're usually quizzes, but an ordinary page with such a title counts once it's read.
-- Pick `<words>` that no other title starts with followed by `riddle`, or those pages count too.
-- A gate can't require one particular page whose title has `riddle` and a number after it, since naming that page makes the gate a count.
+- Give the pages to be counted titles starting with the same words followed by `quiz`, as in `<words> quiz 1`, `<words> quiz 2`, etc. They're usually quizzes, but an ordinary page with such a title counts once it's read.
+- Pick `<words>` that no other title starts with followed by `quiz`, or those pages count too.
+- A gate can't require one particular page whose title has `quiz` and a number after it, since naming that page makes the gate a count.
 
 #### Chapters
 
