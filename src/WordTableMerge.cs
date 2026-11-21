@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -199,6 +200,10 @@ namespace ContentPacks
                 // Undoing pops the latest change first, so a row back at its count is as it was.
                 modified |= merged.Any(r => r.Changes.Count != (depth.TryGetValue(r, out var d) ? d : 0));
             }
+            if (undos > 0)
+            {
+                Log.Warning($"{Target}: {(undos == 1 ? "1 change was" : $"{undos} changes were")} undone; checking the rows again after them took {undoTime.TotalMilliseconds:F0} ms");
+            }
             if (!modified)
             {
                 if (files.Count > 0)
@@ -370,6 +375,7 @@ namespace ContentPacks
             // Rows may have changed since the last call, as merges do.
             categoryLoops = null;
             categoryGaps = null;
+            Stopwatch sinceUndo = null;
             do
             {
                 changed = false;
@@ -386,6 +392,8 @@ namespace ContentPacks
                     }
                     changed = true;
                     undone = true;
+                    undos++;
+                    sinceUndo = sinceUndo ?? Stopwatch.StartNew();
                     cycleRows = null;
                     categoryLoops = null;
                     categoryGaps = null;
@@ -397,8 +405,16 @@ namespace ContentPacks
                 }
             }
             while (changed);
+            if (sinceUndo != null)
+            {
+                undoTime += sinceUndo.Elapsed;
+            }
             return undone;
         }
+
+        // Changes undone by Validate, and the time from each call's first undo to its end.
+        private int undos;
+        private TimeSpan undoTime;
 
         // The game's own row, unchanged.
         private static bool IsStock(Row r) =>
