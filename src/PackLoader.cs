@@ -235,19 +235,22 @@ namespace ContentPacks
         // Checks each text file the packs changed, other than the word table, as the game will read
         // it. A file the game can't read is dropped, with the game's own text restored, since one
         // bad line would stop the game while it loads. Blank lines that end a page are removed
-        // first.
+        // first. Only lines the packs added or changed are read: the check reads each line alone,
+        // and every line of the game's own text passes it.
         private static void CheckText(Dictionary<string, string> textfiles, Dictionary<string, string> stock, List<string> categories)
         {
             foreach (var key in textfiles.Keys.ToList())
             {
                 var text = textfiles[key];
-                if (key == WordTableMerge.Target || (stock.TryGetValue(key, out var original) && original == text))
+                var isStock = stock.TryGetValue(key, out var original);
+                if (key == WordTableMerge.Target || (isStock && original == text))
                 {
                     continue;
                 }
                 text = GameParse.Tidy(text);
                 textfiles[key] = text;
-                var problem = GameParse.FileProblem(text, out var line);
+                var known = isStock ? new HashSet<string>(GameParse.Lines(original)) : null;
+                var problem = GameParse.FileProblem(text, out var line, known);
                 if (problem == null)
                 {
                     continue;

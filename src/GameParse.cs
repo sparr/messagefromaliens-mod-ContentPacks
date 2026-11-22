@@ -54,15 +54,24 @@ namespace ContentPacks
         // a number token shows.
         private static string Shape(string token) => token.Length > 20 ? token.Substring(0, 20) + "..." : token;
 
+        // A page file's lines, split as Global.Init splits them.
+        internal static string[] Lines(string text) => text.Replace("\r\n", "\n").Split('\n');
+
         // Why a page file can't be read, with its 1-based line number, or null. Lines are read as
-        // Global.Init reads them: # starts a page's title, @ a quiz's supply, % an answer.
-        internal static string FileProblem(string text, out int line)
+        // Global.Init reads them: # starts a page's title, @ a quiz's supply, % an answer. Each
+        // line's verdict depends only on its own text, so lines in known, which are known to pass,
+        // are not read again.
+        internal static string FileProblem(string text, out int line, HashSet<string> known = null)
         {
-            var lines = text.Replace("\r\n", "\n").Split('\n');
+            var lines = Lines(text);
             for (var i = 0; i < lines.Length; i++)
             {
                 line = i + 1;
                 var l = lines[i];
+                if (known != null && known.Contains(l))
+                {
+                    continue;
+                }
                 var problem = l.StartsWith("#") ? Problem(l.Substring(1), Read.TitleTokens)
                     : l.StartsWith("@") ? null
                     : l.StartsWith("%") ? Problem(l.Substring(1), Read.Answer)
