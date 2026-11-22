@@ -366,21 +366,43 @@ namespace ContentPacks
         }
 
         // Undoes the latest change of each row that fails, until none does. True if anything was
-        // undone.
+        // undone. The checks run in rounds over pending, in order, until a round undoes nothing.
+        // A round checks a row again only when an undo since its last check could change its
+        // result, since any other row would pass again.
         private bool Validate(List<Row> pending)
         {
             var undone = false;
-            bool changed;
-            cycleRows = null;
             // Rows may have changed since the last call, as merges do.
+            cycleRows = null;
             categoryLoops = null;
-            categoryGaps = null;
-            Stopwatch sinceUndo = null;
-            do
+            gaps = null;
+            BuildUsers();
+            var position = new Dictionary<Row, int>();
+            for (var i = 0; i < pending.Count; i++)
             {
-                changed = false;
-                foreach (var row in pending)
+                position[pending[i]] = i;
+            }
+            var round = new SortedSet<int>(Enumerable.Range(0, pending.Count));
+            var next = new SortedSet<int>();
+            var cursor = -1;
+            // A row after the one being checked is checked later in this round, any other in the
+            // next.
+            void Recheck(Row r)
+            {
+                if (position.TryGetValue(r, out var p))
                 {
+                    (p > cursor ? round : next).Add(p);
+                }
+            }
+            void RecheckAll() => pending.ForEach(Recheck);
+            Stopwatch sinceUndo = null;
+            while (round.Count > 0)
+            {
+                while (round.Count > 0)
+                {
+                    cursor = round.Min;
+                    round.Remove(cursor);
+                    var row = pending[cursor];
                     if (row.Changes.Count == 0 || IsStock(row))
                     {
                         continue;
@@ -390,26 +412,121 @@ namespace ContentPacks
                     {
                         continue;
                     }
-                    changed = true;
                     undone = true;
                     undos++;
                     sinceUndo = sinceUndo ?? Stopwatch.StartNew();
-                    cycleRows = null;
-                    categoryLoops = null;
-                    categoryGaps = null;
-                    var before = row.Changes.Pop();
-                    row.Cells = before.Cells;
-                    row.Removed = before.Removed;
-                    row.Short = before.Short;
-                    Log.Error($"{before.Origin}: {problem}; {(row.Removed ? (row.Stock == null ? "the new row is skipped" : "the row stays removed") : "that change is undone")}");
+                    var origin = Undo(row, Recheck, RecheckAll);
+                    Log.Error($"{origin}: {problem}; {(row.Removed ? (row.Stock == null ? "the new row is skipped" : "the row stays removed") : "that change is undone")}");
                 }
+                (round, next) = (next, round);
+                cursor = -1;
             }
-            while (changed);
             if (sinceUndo != null)
             {
                 undoTime += sinceUndo.Elapsed;
             }
             return undone;
+        }
+
+        // Undoes a row's latest change and updates the caches the checks use. Passes recheck each
+        // row whose check could now give a different result, or calls recheckAll when that is
+        // unknown. Returns the change's origin.
+        private string Undo(Row row, Action<Row> recheck, Action recheckAll)
+        {
+            // Rows the index doesn't hold have an empty word, which no row names, and the caches
+            // leave them out.
+            var held = index.TryGetValue(row.Word, out var own) && own == row;
+            var oldNames = held ? Names(row) : new List<string>();
+            var oldParts = held && !row.Removed ? new HashSet<Row>(Parts(row)) : new HashSet<Row>();
+            var wasRemoved = row.Removed;
+            var wasInCycle = cycleRows != null && cycleRows.Contains(row);
+            var before = row.Changes.Pop();
+            row.Cells = before.Cells;
+            row.Removed = before.Removed;
+            row.Short = before.Short;
+            recheck(row);
+            if (!held)
+            {
+                return before.Origin;
+            }
+            var newNames = Names(row);
+            foreach (var name in newNames)
+            {
+                AddUser(name, row);
+            }
+            // Rows that name this one check that it is live, and the rows it names, before or
+            // now, may be removed rows checking that nothing uses them.
+            if (users.TryGetValue(row.Word, out var namers))
+            {
+                foreach (var r in namers)
+                {
+                    recheck(r);
+                }
+            }
+            foreach (var name in oldNames.Concat(newNames))
+            {
+                if (index.TryGetValue(name, out var named))
+                {
+                    recheck(named);
+                }
+            }
+            UpdateCycles(row, wasInCycle, wasRemoved, oldParts, recheck);
+            UpdateCategoryLoops(row, recheck);
+            UpdateGaps(row, recheck, recheckAll);
+            return before.Origin;
+        }
+
+        // The words a row names: its components, its redirect, a number word's digit, and the
+        // move word for an up-down compound on the hand word. Every word a row's glyph, checks,
+        // or categories come from is among them.
+        private List<string> Names(Row r)
+        {
+            var names = new List<string>();
+            if (r.Cells == null)
+            {
+                return names;
+            }
+            names.Add(r.Cells[cols.Part1Col]);
+            names.Add(r.Cells[cols.Part2Col]);
+            names.Add(r.Cells[cols.RedirectCol]);
+            var code = r.Cells[cols.StructCol];
+            if (KindOf(code) == Kind.Number && r.Word.Length > 0)
+            {
+                names.Add(r.Word.Substring(0, 1));
+                names.Add(r.Word.Split('e')[0]);
+            }
+            if (code == "ud" && r.Cells[cols.Part1Col] == HandWord)
+            {
+                names.Add(MoveWord);
+            }
+            names.RemoveAll(n => n.Length == 0);
+            return names;
+        }
+
+        // The rows the index holds that name each word, as Names gives. Built by each Validate,
+        // and kept through its undos, so it may also hold rows that named a word only before an
+        // undo.
+        private Dictionary<string, HashSet<Row>> users;
+
+        private void BuildUsers()
+        {
+            users = new Dictionary<string, HashSet<Row>>();
+            foreach (var r in index.Values)
+            {
+                foreach (var name in Names(r))
+                {
+                    AddUser(name, r);
+                }
+            }
+        }
+
+        private void AddUser(string name, Row r)
+        {
+            if (!users.TryGetValue(name, out var set))
+            {
+                users[name] = set = new HashSet<Row>();
+            }
+            set.Add(r);
         }
 
         // Changes undone by Validate, and the time from each call's first undo to its end.
@@ -538,7 +655,8 @@ namespace ContentPacks
                     return "a dictionary category's word can't be marked as no word";
                 }
             }
-            if (CategoryGaps().TryGetValue(row, out var gap))
+            var gap = GapReason(row);
+            if (gap != null)
             {
                 return gap;
             }
@@ -596,11 +714,11 @@ namespace ContentPacks
             {
                 return "a dictionary category's word can't be removed";
             }
-            var users = index.Values.Count(r => !r.Removed && r != row
+            var count = !users.TryGetValue(word, out var namers) ? 0 : namers.Count(r => !r.Removed && r != row
                 && (r.Cells[cols.Part1Col] == word || r.Cells[cols.Part2Col] == word
                     || (r.Cells[cols.RedirectCol] == word && KindOf(r.Cells[cols.StructCol]) == Kind.Strokes)
                     || IsNumberOf(r, word)));
-            return users > 0 ? $"can't remove a word that {users} other rows use as a component, redirect, or number digit" : null;
+            return count > 0 ? $"can't remove a word that {count} other rows use as a component, redirect, or number digit" : null;
         }
 
         private bool Live(string word) =>
@@ -612,8 +730,80 @@ namespace ContentPacks
         // those in a strongly connected component of more than one row in the graph of rows and
         // their parts. Found with one pass of Tarjan's algorithm, iterative so that a long chain
         // of words can't overflow the stack, in time linear in rows and parts. Built when first
-        // needed after any row changes.
+        // needed by each Validate, and kept current through its undos by UpdateCycles.
         private HashSet<Row> cycleRows;
+
+        // Every part edge an undo removes or adds touches the undone row. Removed edges were on
+        // no cycle unless the row was on one, and a new cycle passes through the row.
+        private void UpdateCycles(Row row, bool wasInCycle, bool wasRemoved, HashSet<Row> oldParts, Action<Row> recheck)
+        {
+            if (cycleRows == null)
+            {
+                return;
+            }
+            if (wasInCycle)
+            {
+                var old = cycleRows;
+                cycleRows = null;
+                foreach (var r in CycleRows().Union(old).Where(r => old.Contains(r) != cycleRows.Contains(r)).ToList())
+                {
+                    recheck(r);
+                }
+                return;
+            }
+            if (row.Removed || (!wasRemoved && Parts(row).All(oldParts.Contains)))
+            {
+                return;
+            }
+            foreach (var r in CycleThrough(row))
+            {
+                if (cycleRows.Add(r))
+                {
+                    recheck(r);
+                }
+            }
+        }
+
+        // The rows on cycles through start: those it reaches through parts that reach it back.
+        private List<Row> CycleThrough(Row start)
+        {
+            var reached = new HashSet<Row> { start };
+            var stack = new Stack<Row>();
+            stack.Push(start);
+            var self = false;
+            while (stack.Count > 0)
+            {
+                var r = stack.Pop();
+                foreach (var p in Parts(r))
+                {
+                    self |= r == start && p == start;
+                    if (reached.Add(p))
+                    {
+                        stack.Push(p);
+                    }
+                }
+            }
+            // A row that reaches start through rows outside reached is itself outside it.
+            var back = new HashSet<Row> { start };
+            stack.Push(start);
+            while (stack.Count > 0)
+            {
+                var r = stack.Pop();
+                if (!users.TryGetValue(r.Word, out var namers))
+                {
+                    continue;
+                }
+                foreach (var u in namers)
+                {
+                    if (reached.Contains(u) && !back.Contains(u) && Parts(u).Contains(r))
+                    {
+                        back.Add(u);
+                        stack.Push(u);
+                    }
+                }
+            }
+            return back.Count > 1 || self ? back.ToList() : new List<Row>();
+        }
 
         private HashSet<Row> CycleRows()
         {
@@ -718,9 +908,26 @@ namespace ContentPacks
         // category word itself, has that word among its categories stops the game. The part gets
         // it from a basic glyph whose redirect names the word, or from the game's one special
         // case for an up-down compound on the hand word. Holds the category word, and when it is
-        // the game's own row, every row on the way to the source. Built when first needed after
-        // any row changes.
+        // the game's own row, every row on the way to the source. Built when first needed by each
+        // Validate, and again after an undo of a row it looked up.
         private HashSet<Row> categoryLoops;
+        // The words looked up while building categoryLoops.
+        private HashSet<string> loopWords;
+
+        private void UpdateCategoryLoops(Row row, Action<Row> recheck)
+        {
+            if (categoryLoops == null || Global.category_list == null
+                || (!Global.category_list.Contains(row.Word) && !loopWords.Contains(row.Word)))
+            {
+                return;
+            }
+            var old = categoryLoops;
+            categoryLoops = null;
+            foreach (var r in CategoryLoops().Union(old).Where(r => old.Contains(r) != categoryLoops.Contains(r)).ToList())
+            {
+                recheck(r);
+            }
+        }
 
         private const string MoveWord = "move";
         private const string HandWord = "hand";
@@ -732,14 +939,19 @@ namespace ContentPacks
                 return categoryLoops;
             }
             categoryLoops = new HashSet<Row>();
+            loopWords = new HashSet<string>();
             if (Global.category_list == null)
             {
                 return categoryLoops;
             }
-            foreach (var row in index.Values)
+            foreach (var category in Global.category_list.Distinct())
             {
-                if (row.Removed || KindOf(row.Cells[cols.StructCol]) != Kind.OnePart || !Global.category_list.Contains(row.Word)
-                    || !index.TryGetValue(row.Cells[cols.Part1Col], out var part) || part.Removed || Global.category_list.Contains(part.Word))
+                if (!index.TryGetValue(category, out var row) || row.Removed || KindOf(row.Cells[cols.StructCol]) != Kind.OnePart)
+                {
+                    continue;
+                }
+                loopWords.Add(row.Cells[cols.Part1Col]);
+                if (!index.TryGetValue(row.Cells[cols.Part1Col], out var part) || part.Removed || Global.category_list.Contains(part.Word))
                 {
                     continue;
                 }
@@ -800,6 +1012,7 @@ namespace ContentPacks
             {
                 return part == category;
             }
+            loopWords.Add(part);
             return index.TryGetValue(part, out var r) && !r.Removed && HasCategory(r, category, memo);
         }
 
@@ -809,73 +1022,252 @@ namespace ContentPacks
         private const string NoWord = "token";
         private static readonly string[] TypeCategories = { "changeword", "linkword" };
 
-        // Rows whose latest change leaves a word with no dictionary category, or a dictionary
-        // category with no word, with the reason. Global.Init files each word under categories
-        // the way Categories works it out. The dictionary page fails to draw while a word with
-        // none is shown, and the dictionary page and note editor fail to open while a category
-        // in Global.category_list is empty. A changed row is blamed for its own loss; a loss in
-        // one of the game's own rows blames the changed rows its categories come from. Built when
-        // first needed after any row changes.
-        private Dictionary<Row, string> categoryGaps;
-
-        private Dictionary<Row, string> CategoryGaps()
+        // Why a row's latest change leaves a word with no dictionary category, or a dictionary
+        // category with no word, or null. Global.Init files each word under categories the way
+        // CategoryFinder works it out. The dictionary page fails to draw while a word with none
+        // is shown, and the dictionary page and note editor fail to open while a category in
+        // Global.category_list is empty. A changed row is blamed for its own loss; a loss in one
+        // of the game's own rows blames the changed rows its categories come from.
+        private string GapReason(Row row)
         {
-            if (categoryGaps != null)
-            {
-                return categoryGaps;
-            }
-            categoryGaps = new Dictionary<Row, string>();
             if (Global.category_list == null)
             {
-                return categoryGaps;
+                return null;
             }
+            gaps = gaps ?? BuildGaps();
+            var changed = !IsStock(row);
+            if ((changed && gaps.NoCategory.Contains(row)) || gaps.BlamedForNoCategory.Contains(row))
+            {
+                return NoCategoryReason;
+            }
+            if ((changed && gaps.Empty.Contains(row.Word) && !row.Removed && index.TryGetValue(row.Word, out var own) && own == row)
+                || (changed && gaps.LostBy.TryGetValue(row, out var lost) && lost.Overlaps(gaps.Empty))
+                || gaps.BlamedForEmpty.Contains(row))
+            {
+                return EmptyReason;
+            }
+            return null;
+        }
+
+        private const string NoCategoryReason = "it leaves a word with no dictionary category, so the dictionary page fails to draw while that word is shown";
+        private const string EmptyReason = "it leaves a dictionary category with no words, so the dictionary page and the note editor fail to open";
+
+        // Every live word's categories, and what GapReason reads from them. Built when first
+        // needed by each Validate, and kept current through its undos by UpdateGaps.
+        private Gaps gaps;
+        // The categories among the first 10 of any word's in the game's own table.
+        private HashSet<string> filledBefore;
+
+        private sealed class Gaps
+        {
+            public CategoryFinder Finder;
+            // Built with no cycle of parts, so that each word's categories depend only on the
+            // words it names, and an undo can redo just the words built on the undone row.
+            public bool Exact;
+            public readonly Dictionary<Row, List<string>> Now = new Dictionary<Row, List<string>>();
+            // Live words with no category, where the game's own table gives them one or doesn't
+            // have them, and those of them that are the game's own rows.
+            public readonly HashSet<Row> NoCategory = new HashSet<Row>();
+            public readonly HashSet<Row> NoCategoryStock = new HashSet<Row>();
+            // How many live words have each category among their first 10.
+            public readonly Dictionary<string, int> Filled = new Dictionary<string, int>();
+            // The categories each word had among its first 10 in the game's table and now lacks,
+            // and the reverse.
+            public readonly Dictionary<Row, HashSet<string>> LostBy = new Dictionary<Row, HashSet<string>>();
+            public readonly Dictionary<string, HashSet<Row>> Lost = new Dictionary<string, HashSet<Row>>();
+            // Categories in Global.category_list that have words in the game's table and none now.
+            public readonly HashSet<string> Empty = new HashSet<string>();
+            // Changed rows that the game's own rows' losses blame.
+            public HashSet<Row> BlamedForNoCategory = new HashSet<Row>();
+            public HashSet<Row> BlamedForEmpty = new HashSet<Row>();
+        }
+
+        private Gaps BuildGaps()
+        {
             if (stockCategories == null)
             {
                 stockCategories = Categories(w => stockRows.TryGetValue(w, out var c) ? c : null, stockRows.Keys);
+                // UpdateDict reads each category from the first 10 of every word's categories.
+                filledBefore = new HashSet<string>(stockCategories.Values.SelectMany(c => c.Take(10)));
             }
-            var live = index.Values.Where(r => !r.Removed).ToList();
-            var now = Categories(w => index.TryGetValue(w, out var r) && !r.Removed ? r.Cells : null, live.Select(r => r.Word));
-            void Blame(Row source, string reason)
+            var g = new Gaps
             {
-                var blamed = !IsStock(source) ? new[] { source } : Sources(source).Where(r => !IsStock(r));
-                foreach (var r in blamed)
+                Finder = new CategoryFinder(w => index.TryGetValue(w, out var r) && !r.Removed ? r.Cells : null, cols),
+                Exact = CycleRows().Count == 0,
+            };
+            foreach (var row in index.Values.Where(r => !r.Removed).ToList())
+            {
+                SetCategories(g, row, g.Finder.Of(row.Word), null);
+            }
+            foreach (var category in Global.category_list)
+            {
+                if (IsEmpty(g, category))
                 {
-                    if (!categoryGaps.ContainsKey(r))
+                    g.Empty.Add(category);
+                }
+            }
+            UpdateBlamed(g, null);
+            return g;
+        }
+
+        private bool IsEmpty(Gaps g, string category) =>
+            category != NoWord && (!g.Filled.TryGetValue(category, out var n) || n == 0) && filledBefore.Contains(category);
+
+        // Records a row's categories, or null for a removed row. Adds each category whose count
+        // of words changes to changed, when given.
+        private void SetCategories(Gaps g, Row row, List<string> now, HashSet<string> changed)
+        {
+            if (g.Now.TryGetValue(row, out var old))
+            {
+                foreach (var c in old.Take(10).Distinct())
+                {
+                    g.Filled[c]--;
+                    changed?.Add(c);
+                }
+            }
+            if (now == null)
+            {
+                g.Now.Remove(row);
+            }
+            else
+            {
+                g.Now[row] = now;
+                foreach (var c in now.Take(10).Distinct())
+                {
+                    g.Filled[c] = g.Filled.TryGetValue(c, out var n) ? n + 1 : 1;
+                    changed?.Add(c);
+                }
+            }
+            var none = now != null && now.Count == 0 && (!stockCategories.TryGetValue(row.Word, out var before) || before.Count > 0);
+            if (none)
+            {
+                g.NoCategory.Add(row);
+            }
+            else
+            {
+                g.NoCategory.Remove(row);
+            }
+            if (none && IsStock(row))
+            {
+                g.NoCategoryStock.Add(row);
+            }
+            else
+            {
+                g.NoCategoryStock.Remove(row);
+            }
+            if (g.LostBy.TryGetValue(row, out var lostBefore))
+            {
+                foreach (var c in lostBefore)
+                {
+                    g.Lost[c].Remove(row);
+                }
+                g.LostBy.Remove(row);
+            }
+            if (now != null && stockCategories.TryGetValue(row.Word, out var had))
+            {
+                var lost = new HashSet<string>(had.Take(10).Except(now.Take(10)));
+                if (lost.Count > 0)
+                {
+                    g.LostBy[row] = lost;
+                    foreach (var c in lost)
                     {
-                        categoryGaps[r] = reason;
+                        if (!g.Lost.TryGetValue(c, out var set))
+                        {
+                            g.Lost[c] = set = new HashSet<Row>();
+                        }
+                        set.Add(row);
                     }
                 }
             }
-            foreach (var row in live)
+        }
+
+        // Redoes the categories of the undone row and every row built on it, through the words
+        // rows name. Their categories are the only ones that can change, unless there is a cycle
+        // of parts, when it all is built again.
+        private void UpdateGaps(Row row, Action<Row> recheck, Action recheckAll)
+        {
+            if (gaps == null)
             {
-                if (now[row.Word].Count == 0 && (!stockCategories.TryGetValue(row.Word, out var before) || before.Count > 0))
-                {
-                    Blame(row, "it leaves a word with no dictionary category, so the dictionary page fails to draw while that word is shown");
-                }
+                return;
             }
-            // UpdateDict reads each category from the first 10 of every word's categories.
-            var filled = new HashSet<string>(now.Values.SelectMany(c => c.Take(10)));
-            var filledBefore = new HashSet<string>(stockCategories.Values.SelectMany(c => c.Take(10)));
-            foreach (var category in Global.category_list)
+            if (!gaps.Exact || CycleRows().Count > 0)
             {
-                if (category == NoWord || filled.Contains(category) || !filledBefore.Contains(category))
+                gaps = null;
+                recheckAll();
+                return;
+            }
+            var affected = new List<Row> { row };
+            var seen = new HashSet<Row> { row };
+            for (var i = 0; i < affected.Count; i++)
+            {
+                var word = affected[i].Word;
+                if (!users.TryGetValue(word, out var namers))
                 {
                     continue;
                 }
-                const string reason = "it leaves a dictionary category with no words, so the dictionary page and the note editor fail to open";
-                if (index.TryGetValue(category, out var own) && !own.Removed && !IsStock(own))
+                foreach (var u in namers)
                 {
-                    Blame(own, reason);
-                }
-                foreach (var row in live)
-                {
-                    if (stockCategories.TryGetValue(row.Word, out var had) && had.Take(10).Contains(category) && !now[row.Word].Take(10).Contains(category))
+                    if (!u.Removed && !seen.Contains(u) && Names(u).Contains(word))
                     {
-                        Blame(row, reason);
+                        seen.Add(u);
+                        affected.Add(u);
                     }
                 }
             }
-            return categoryGaps;
+            foreach (var r in affected)
+            {
+                gaps.Finder.Forget(r.Word);
+            }
+            var changed = new HashSet<string>();
+            foreach (var r in affected)
+            {
+                SetCategories(gaps, r, r.Removed ? null : gaps.Finder.Of(r.Word), changed);
+                recheck(r);
+            }
+            foreach (var c in changed)
+            {
+                if (!Global.category_list.Contains(c) || IsEmpty(gaps, c) == gaps.Empty.Contains(c))
+                {
+                    continue;
+                }
+                if (!gaps.Empty.Remove(c))
+                {
+                    gaps.Empty.Add(c);
+                }
+                if (index.TryGetValue(c, out var own))
+                {
+                    recheck(own);
+                }
+                if (gaps.Lost.TryGetValue(c, out var lost))
+                {
+                    foreach (var r in lost)
+                    {
+                        recheck(r);
+                    }
+                }
+            }
+            UpdateBlamed(gaps, recheck);
+        }
+
+        // Finds the changed rows that the game's own rows' losses blame.
+        private void UpdateBlamed(Gaps g, Action<Row> recheck)
+        {
+            var noCategory = g.NoCategoryStock.ToList();
+            var empty = g.Empty.SelectMany(c => g.Lost.TryGetValue(c, out var lost) ? lost.Where(IsStock) : Enumerable.Empty<Row>()).ToList();
+            if (noCategory.Count == 0 && empty.Count == 0 && g.BlamedForNoCategory.Count == 0 && g.BlamedForEmpty.Count == 0)
+            {
+                return;
+            }
+            var old = g.BlamedForNoCategory.Concat(g.BlamedForEmpty).ToList();
+            g.BlamedForNoCategory = new HashSet<Row>(noCategory.SelectMany(Sources).Where(r => !IsStock(r)));
+            g.BlamedForEmpty = new HashSet<Row>(empty.SelectMany(Sources).Where(r => !IsStock(r)));
+            if (recheck != null)
+            {
+                foreach (var r in old.Concat(g.BlamedForNoCategory).Concat(g.BlamedForEmpty))
+                {
+                    recheck(r);
+                }
+            }
         }
 
         // The rows a row's categories come from, itself included, following its parts, a
@@ -926,14 +1318,38 @@ namespace ContentPacks
             return seen;
         }
 
-        // Each word's dictionary categories, as Global.Init and Search_Radicial work them out.
-        // cellsOf gives a word's row, or null for no word. A word that names no word where the
-        // game needs one, or is built from itself, fails other checks; here it just adds nothing.
+        // Each word's dictionary categories, by word.
         private Dictionary<string, List<string>> Categories(Func<string, string[]> cellsOf, IEnumerable<string> words)
         {
-            var depths = new Dictionary<string, Dictionary<string, int>>();
-            var visiting = new HashSet<string>();
-            Dictionary<string, int> Depths(string a)
+            var finder = new CategoryFinder(cellsOf, cols);
+            var result = new Dictionary<string, List<string>>();
+            foreach (var word in words)
+            {
+                result[word] = finder.Of(word);
+            }
+            return result;
+        }
+
+        // Works out each word's dictionary categories, as Global.Init and Search_Radicial do.
+        // cellsOf gives a word's row, or null for no word. A word that names no word where the
+        // game needs one, or is built from itself, fails other checks; here it just adds nothing.
+        // Each word's category depths are kept until Forget drops them.
+        private sealed class CategoryFinder
+        {
+            private readonly Func<string, string[]> cellsOf;
+            private readonly WordTableColumns cols;
+            private readonly Dictionary<string, Dictionary<string, int>> depths = new Dictionary<string, Dictionary<string, int>>();
+            private readonly HashSet<string> visiting = new HashSet<string>();
+
+            internal CategoryFinder(Func<string, string[]> cellsOf, WordTableColumns cols)
+            {
+                this.cellsOf = cellsOf;
+                this.cols = cols;
+            }
+
+            internal void Forget(string word) => depths.Remove(word);
+
+            private Dictionary<string, int> Depths(string a)
             {
                 if (depths.TryGetValue(a, out var known))
                 {
@@ -1015,19 +1431,18 @@ namespace ContentPacks
                 depths[a] = d;
                 return d;
             }
-            string RenameOf(string w, string[] cells) => cells[cols.RenameCol].Trim() == "" ? w : cells[cols.RenameCol];
-            var result = new Dictionary<string, List<string>>();
-            foreach (var word in words)
+            private string RenameOf(string w, string[] cells) => cells[cols.RenameCol].Trim() == "" ? w : cells[cols.RenameCol];
+
+            internal List<string> Of(string word)
             {
                 var cells = cellsOf(word);
                 var types = Global.StringToListString(cells[cols.WordTypeCol]);
                 var firstType = types.Count > 0 ? types[0] : "";
                 var categories = new List<string>();
-                result[word] = categories;
                 if (cells[cols.RedirectCol] == NoWord || firstType == NoWord || RenameOf(word, cells) != word)
                 {
                     categories.Add(NoWord);
-                    continue;
+                    return categories;
                 }
                 var d = Depths(word);
                 var nearest = d.Count == 0 ? 10000 : d.Values.Min();
@@ -1043,8 +1458,8 @@ namespace ContentPacks
                 {
                     categories.Add(firstType);
                 }
+                return categories;
             }
-            return result;
         }
 
         // How many times a word appears in the game's text, other than the word table. The text is
