@@ -70,7 +70,14 @@ namespace ContentPacks
             {
                 return;
             }
-            var words = WordsToRender(OriginalTable, table, out var added, out var changed);
+            var before = Rows(OriginalTable);
+            var after = Rows(table);
+            if (before == null || after == null)
+            {
+                Log.Error($"Glyphs: the word table has no {WordTableColumns.Struct}, {WordTableColumns.Part1}, {WordTableColumns.Part2}, or {WordTableColumns.Modifier} column; no glyphs drawn");
+                return;
+            }
+            var words = WordsToRender(before, after, out var added, out var changed);
             if (words.Count == 0)
             {
                 return;
@@ -79,13 +86,13 @@ namespace ContentPacks
             spriteMaterial = m.alien_slots[0, 0].sp.sharedMaterial;
             // The game's one solid word has a sprite of a half-transparent filled cell. Every solid
             // word is shown with it, with the game's own material.
-            var cursor = SolidSprite(OriginalTable);
+            var cursor = SolidSprite(before);
             var solids = 0;
             if (cursor != null)
             {
                 solids = words.RemoveAll(w =>
                 {
-                    if (!IsSolid(w))
+                    if (!IsSolid(after[w]))
                     {
                         return false;
                     }
@@ -124,7 +131,7 @@ namespace ContentPacks
             {
                 foreach (var word in words)
                 {
-                    Render(m, cam, word);
+                    Render(m, cam, word, IsSolid(after[word]));
                 }
             }
             finally
@@ -135,20 +142,15 @@ namespace ContentPacks
             Finish();
         }
 
-        private static bool IsSolid(string word) =>
-            Global.alien_text.TryGetValue(word, out var info) && info.characterstruct == PosRelation.Solid;
+        // As the game reads the struct column in Global.Init: case-sensitive, as written.
+        private static bool IsSolid(ShapeColumns shape) => shape.Struct == SolidCode;
 
         // The stock sprite of a solid word in the game's own table, or null if there is none.
-        private static Sprite SolidSprite(string original)
+        private static Sprite SolidSprite(Dictionary<string, ShapeColumns> original)
         {
-            var rows = Rows(original);
-            if (rows == null)
+            foreach (var kv in original)
             {
-                return null;
-            }
-            foreach (var kv in rows)
-            {
-                if (string.Equals(kv.Value.Struct, SolidCode, StringComparison.OrdinalIgnoreCase))
+                if (IsSolid(kv.Value))
                 {
                     var sprite = Resources.Load<Sprite>(SpritePath + kv.Key);
                     if (sprite != null)
@@ -162,17 +164,11 @@ namespace ContentPacks
 
         // Words that are new, whose shape columns differ from the game's table, or that are built
         // from such a word at any depth.
-        private static List<string> WordsToRender(string original, string final, out int added, out int changed)
+        private static List<string> WordsToRender(Dictionary<string, ShapeColumns> before, Dictionary<string, ShapeColumns> after,
+            out int added, out int changed)
         {
-            var before = Rows(original);
-            var after = Rows(final);
             added = 0;
             changed = 0;
-            if (before == null || after == null)
-            {
-                Log.Error($"Glyphs: the word table has no {WordTableColumns.Struct}, {WordTableColumns.Part1}, {WordTableColumns.Part2}, or {WordTableColumns.Modifier} column; no glyphs drawn");
-                return new List<string>();
-            }
             var users = new Dictionary<string, List<string>>();
             foreach (var kv in after)
             {
@@ -294,7 +290,7 @@ namespace ContentPacks
         }
 
         // Draws one word with the game's glyph drawing code and queues its readback.
-        private static void Render(Draw m, Camera cam, string word)
+        private static void Render(Draw m, Camera cam, string word, bool solid)
         {
             var job = new Job { Word = word };
             pending++;
@@ -302,7 +298,7 @@ namespace ContentPacks
             RenderTexture unrequested = null;
             try
             {
-                if (Global.alien_text.TryGetValue(word, out var info) && info.characterstruct == PosRelation.Solid)
+                if (solid)
                 {
                     // Only when the game has no solid sprite to share: the game's one solid word
                     // was baked as a filled rectangle over the whole cell, in palette color -2,
