@@ -39,7 +39,6 @@ namespace ContentPacks
         private static int pending;
         private static int failed;
         private static bool queued;
-        private static bool finished;
 
         // Called every frame until the game has loaded and the glyphs are queued.
         internal static void Tick()
@@ -570,11 +569,10 @@ namespace ContentPacks
         // page in case it was drawn before the sprites.
         private static void Finish()
         {
-            if (!queued || pending > 0 || finished)
+            if (!queued || pending > 0)
             {
                 return;
             }
-            finished = true;
             Log.Info(failed == 0 ? $"Glyphs: {sprites.Count} drawn" : $"Glyphs: {sprites.Count} drawn, {failed} kept the game's image");
             Global.manager?.UpdateText();
         }
