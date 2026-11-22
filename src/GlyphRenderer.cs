@@ -339,7 +339,6 @@ namespace ContentPacks
                     {
                         shape.settings.outlineColor = Color.white;
                     }
-                    shape.ComputeAndApply();
                 }
                 // Every piece has the same quad, so they share the framing.
                 var bounds = shapes[0].GetShapeBounds();
