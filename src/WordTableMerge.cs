@@ -970,50 +970,107 @@ namespace ContentPacks
         }
 
         // Whether Search_Radicial gives a word that isn't a category word the category named
-        // category, following its parts as the game does. memo records each row visited.
-        private bool HasCategory(Row r, string category, Dictionary<Row, bool> memo)
+        // category, following its parts as the game does. memo records each row visited, false
+        // while it is being worked out, so a cycle of components, which another check rejects,
+        // ends there. A depth-first search with its own stack, so that a long chain of words
+        // can't overflow the thread's stack. A frame's step is 0 before its first part, 1 after
+        // its first part, and 2 after its second.
+        private bool HasCategory(Row start, string category, Dictionary<Row, bool> memo)
         {
-            if (memo.TryGetValue(r, out var known))
+            if (memo.TryGetValue(start, out var known))
             {
                 return known;
             }
-            // A cycle of components, which another check rejects.
-            memo[r] = false;
-            var found = false;
-            var word = r.Word;
-            var p1 = r.Cells[cols.Part1Col];
-            var p2 = r.Cells[cols.Part2Col];
-            switch (KindOf(r.Cells[cols.StructCol]))
+            var work = new Stack<(Row Row, int Step)>();
+            memo[start] = false;
+            work.Push((start, 0));
+            // The result of the frame that finished last.
+            var last = false;
+            while (work.Count > 0)
             {
-                case Kind.Strokes:
-                    var redirect = r.Cells[cols.RedirectCol];
-                    found = (redirect.Length > 0 && !redirectMarkers.Contains(redirect) ? redirect : word) == category;
-                    break;
-                case Kind.Number:
-                    found = word.Substring(0, 1) == category;
-                    break;
-                case Kind.OnePart:
-                    found = PartHasCategory(p1, category, memo);
-                    break;
-                case Kind.TwoParts:
-                    var moveCase = word != MoveWord && r.Cells[cols.StructCol] == "ud" && p1 == HandWord && p2 != HandWord;
-                    found = (moveCase ? MoveWord == category : PartHasCategory(p1, category, memo))
-                        || PartHasCategory(p2, category, memo);
-                    break;
+                var (r, step) = work.Pop();
+                var word = r.Word;
+                var p1 = r.Cells[cols.Part1Col];
+                var p2 = r.Cells[cols.Part2Col];
+                bool? found = null;
+                Row next = null;
+                switch (KindOf(r.Cells[cols.StructCol]))
+                {
+                    case Kind.Strokes:
+                        var redirect = r.Cells[cols.RedirectCol];
+                        found = (redirect.Length > 0 && !redirectMarkers.Contains(redirect) ? redirect : word) == category;
+                        break;
+                    case Kind.Number:
+                        found = word.Substring(0, 1) == category;
+                        break;
+                    case Kind.OnePart:
+                        found = step == 0 ? PartHasCategory(p1, category, memo, out next) : last;
+                        step = 1;
+                        break;
+                    case Kind.TwoParts:
+                        bool? first = null;
+                        if (step == 0)
+                        {
+                            var moveCase = word != MoveWord && r.Cells[cols.StructCol] == "ud" && p1 == HandWord && p2 != HandWord;
+                            first = moveCase ? MoveWord == category : PartHasCategory(p1, category, memo, out next);
+                            step = 1;
+                        }
+                        else if (step == 1)
+                        {
+                            first = last;
+                        }
+                        if (step == 2)
+                        {
+                            found = last;
+                        }
+                        else if (first == true)
+                        {
+                            found = true;
+                        }
+                        else if (first == false)
+                        {
+                            found = PartHasCategory(p2, category, memo, out next);
+                            step = 2;
+                        }
+                        break;
+                    default:
+                        found = false;
+                        break;
+                }
+                if (next != null)
+                {
+                    // Continue this frame once the part's frame finishes.
+                    work.Push((r, step));
+                    memo[next] = false;
+                    work.Push((next, 0));
+                    continue;
+                }
+                memo[r] = found.Value;
+                last = found.Value;
             }
-            memo[r] = found;
-            return found;
+            return last;
         }
 
         // A part that is a category word gives only itself; any other gives its own categories.
-        private bool PartHasCategory(string part, string category, Dictionary<Row, bool> memo)
+        // Gives the result, or null with next set to a row whose result must be worked out first.
+        private bool? PartHasCategory(string part, string category, Dictionary<Row, bool> memo, out Row next)
         {
+            next = null;
             if (Global.category_list.Contains(part))
             {
                 return part == category;
             }
             loopWords.Add(part);
-            return index.TryGetValue(part, out var r) && !r.Removed && HasCategory(r, category, memo);
+            if (!index.TryGetValue(part, out var r) || r.Removed)
+            {
+                return false;
+            }
+            if (memo.TryGetValue(r, out var known))
+            {
+                return known;
+            }
+            next = r;
+            return null;
         }
 
         // The game's no-word marker. Global.Init gives a word with it as its redirect or first
@@ -1349,87 +1406,168 @@ namespace ContentPacks
 
             internal void Forget(string word) => depths.Remove(word);
 
+            // A word that is being worked out, and the parts it still has to merge.
+            private sealed class Frame
+            {
+                public string Word;
+                public string Code;
+                public Kind Kind;
+                public string[] Items;
+                // The next item to look at, and whether the depths in hand are that item's.
+                public int Next;
+                public bool Merging;
+                public Dictionary<string, int> D;
+            }
+
+            // Each category a word falls under, with its depth. A word being worked out gives
+            // nothing to a word built on it, as in a cycle of components, which another check
+            // rejects. A depth-first search with its own stack, so that a long chain of words
+            // can't overflow the thread's stack.
             private Dictionary<string, int> Depths(string a)
             {
                 if (depths.TryGetValue(a, out var known))
                 {
                     return known;
                 }
-                var d = new Dictionary<string, int>();
                 var cells = cellsOf(a);
                 if (cells == null || !visiting.Add(a))
                 {
-                    return d;
+                    return new Dictionary<string, int>();
                 }
-                var code = cells[cols.StructCol];
-                var p1 = cells[cols.Part1Col];
-                var p2 = cells[cols.Part2Col];
-                switch (KindOf(code))
+                var work = new Stack<Frame>();
+                work.Push(Begin(a, cells));
+                // The depths of the word that finished last.
+                Dictionary<string, int> last = null;
+                while (work.Count > 0)
+                {
+                    var f = work.Peek();
+                    if (f.Merging)
+                    {
+                        Merge(f, last);
+                        f.Merging = false;
+                        f.Next++;
+                    }
+                    var part = NextPart(f);
+                    if (part == null)
+                    {
+                        visiting.Remove(f.Word);
+                        depths[f.Word] = f.D;
+                        last = f.D;
+                        work.Pop();
+                        continue;
+                    }
+                    f.Merging = true;
+                    if (depths.TryGetValue(part, out known))
+                    {
+                        last = known;
+                        continue;
+                    }
+                    var partCells = cellsOf(part);
+                    if (partCells == null || !visiting.Add(part))
+                    {
+                        last = new Dictionary<string, int>();
+                        continue;
+                    }
+                    work.Push(Begin(part, partCells));
+                }
+                return last;
+            }
+
+            // Starts working out a word, with the depths that need no part's.
+            private Frame Begin(string a, string[] cells)
+            {
+                var f = new Frame
+                {
+                    Word = a,
+                    Code = cells[cols.StructCol],
+                    Kind = KindOf(cells[cols.StructCol]),
+                    Items = new[] { cells[cols.Part1Col], cells[cols.Part2Col] },
+                    D = new Dictionary<string, int>(),
+                };
+                switch (f.Kind)
                 {
                     case Kind.Strokes:
                         var redirect = cells[cols.RedirectCol];
-                        d[redirect != "" && redirect != NoWord ? redirect : a] = 0;
+                        f.D[redirect != "" && redirect != NoWord ? redirect : a] = 0;
+                        f.Next = f.Items.Length;
                         break;
                     case Kind.Number:
-                        d[a.Substring(0, 1)] = 0;
+                        f.D[a.Substring(0, 1)] = 0;
+                        f.Next = f.Items.Length;
                         break;
                     case Kind.OnePart:
                         if (Global.category_list.Contains(a))
                         {
-                            d[a] = 0;
+                            f.D[a] = 0;
                         }
-                        if (Global.category_list.Contains(p1))
-                        {
-                            d[p1] = 0;
-                        }
-                        else
-                        {
-                            foreach (var kv in Depths(p1))
-                            {
-                                d[kv.Key] = kv.Value;
-                            }
-                        }
+                        f.Items = new[] { f.Items[0] };
                         break;
                     case Kind.TwoParts:
                         if (Global.category_list.Contains(a))
                         {
-                            d[a] = 0;
-                        }
-                        foreach (var item in new[] { p1, p2 })
-                        {
-                            if (item == "")
-                            {
-                                continue;
-                            }
-                            if (a != MoveWord && item == HandWord && code == "ud" && p1 == HandWord && p2 != HandWord)
-                            {
-                                if (!d.ContainsKey(MoveWord))
-                                {
-                                    d[MoveWord] = 1;
-                                }
-                                continue;
-                            }
-                            if (Global.category_list.Contains(item))
-                            {
-                                if (!d.ContainsKey(item))
-                                {
-                                    d[item] = 1;
-                                }
-                                continue;
-                            }
-                            foreach (var kv in Depths(item))
-                            {
-                                if (!d.TryGetValue(kv.Key, out var have) || kv.Value + 1 < have)
-                                {
-                                    d[kv.Key] = kv.Value + 1;
-                                }
-                            }
+                            f.D[a] = 0;
                         }
                         break;
                 }
-                visiting.Remove(a);
-                depths[a] = d;
-                return d;
+                return f;
+            }
+
+            // Adds the items before the next part whose depths are needed, and returns that part,
+            // or null when there is none.
+            private string NextPart(Frame f)
+            {
+                for (; f.Next < f.Items.Length; f.Next++)
+                {
+                    var item = f.Items[f.Next];
+                    if (f.Kind == Kind.OnePart)
+                    {
+                        if (Global.category_list.Contains(item))
+                        {
+                            f.D[item] = 0;
+                            continue;
+                        }
+                        return item;
+                    }
+                    if (item == "")
+                    {
+                        continue;
+                    }
+                    if (f.Word != MoveWord && item == HandWord && f.Code == "ud" && f.Items[0] == HandWord && f.Items[1] != HandWord)
+                    {
+                        if (!f.D.ContainsKey(MoveWord))
+                        {
+                            f.D[MoveWord] = 1;
+                        }
+                        continue;
+                    }
+                    if (Global.category_list.Contains(item))
+                    {
+                        if (!f.D.ContainsKey(item))
+                        {
+                            f.D[item] = 1;
+                        }
+                        continue;
+                    }
+                    return item;
+                }
+                return null;
+            }
+
+            // Adds a part's depths: a one-part word's as they are, a two-part word's one deeper,
+            // keeping the nearest.
+            private static void Merge(Frame f, Dictionary<string, int> part)
+            {
+                foreach (var kv in part)
+                {
+                    if (f.Kind == Kind.OnePart)
+                    {
+                        f.D[kv.Key] = kv.Value;
+                    }
+                    else if (!f.D.TryGetValue(kv.Key, out var have) || kv.Value + 1 < have)
+                    {
+                        f.D[kv.Key] = kv.Value + 1;
+                    }
+                }
             }
             private string RenameOf(string w, string[] cells) => cells[cols.RenameCol].Trim() == "" ? w : cells[cols.RenameCol];
 
