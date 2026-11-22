@@ -328,7 +328,11 @@ namespace ContentPacks
                     else
                     {
                         Log.Debug($"{Origin(word)}: its glyph has {count} line segments, which Shapes2D cannot draw as one path, so it is drawn in pieces");
-                        shapes.AddRange(DrawPathInPieces(m, strokes));
+                        var extent = Extent(strokes);
+                        for (var start = 0; start < count; start += PieceSegments)
+                        {
+                            shapes.Add(m.DrawPath1(PieceStrokes(strokes, extent, start), Far, 0, -1f, default, true, false));
+                        }
                     }
                 }
                 foreach (var shape in shapes)
@@ -497,57 +501,54 @@ namespace ContentPacks
             return count;
         }
 
-        // Draw.DrawPath1's steps, with the path split across shapes of at most PieceSegments
-        // segments. The whole glyph is scaled before it's split, so every piece lines up.
-        private static List<Shape> DrawPathInPieces(Draw m, List<List<Vector2>> pos)
+        private static bool IsWidthMarker(List<Vector2> path) => path.Count == 1 && path[0].y == -100f;
+
+        // The largest distance of a point from the center in x and in y, over the strokes that are
+        // not width markers, as Draw.DrawPath1 finds it to scale the glyph.
+        private static Vector2 Extent(List<List<Vector2>> strokes)
         {
-            var width = new Vector2(1f, 1f);
-            for (var i = pos.Count - 1; i >= 0; i--)
-            {
-                if (pos[i].Count == 1 && pos[i][0].y == -100f)
-                {
-                    width = pos[i][0];
-                    pos.RemoveAt(i);
-                }
-            }
             float maxX = 0f, maxY = 0f;
-            foreach (var path in pos)
+            foreach (var path in strokes)
             {
+                if (IsWidthMarker(path))
+                {
+                    continue;
+                }
                 foreach (var p in path)
                 {
                     maxX = Mathf.Max(maxX, Mathf.Abs(p.x));
                     maxY = Mathf.Max(maxY, Mathf.Abs(p.y));
                 }
             }
-            var resize = new Vector2(0.8f * width.x, 0.8f);
-            if (resize.x < maxX * 2f || resize.y < maxY * 2f)
+            return new Vector2(maxX, maxY);
+        }
+
+        // Strokes for Draw.DrawPath1 that draw the glyph's line segments from startIndex, at most
+        // PieceSegments of them, scaled and placed as the whole glyph would be: its width markers,
+        // the parts of its strokes holding those segments, and a one-point stroke at its extent,
+        // which draws nothing but gives DrawPath1 the whole glyph's size.
+        private static List<List<Vector2>> PieceStrokes(List<List<Vector2>> strokes, Vector2 extent, int startIndex)
+        {
+            var piece = new List<List<Vector2>>();
+            var index = 0;
+            foreach (var path in strokes)
             {
-                pos = m.Scale_to(pos, maxX, maxY, resize);
-            }
-            var segments = new List<PathSegment>();
-            foreach (var path in pos)
-            {
-                for (var i = 0; i < path.Count - 1; i++)
+                if (IsWidthMarker(path))
                 {
-                    segments.Add(new PathSegment(path[i], (path[i + 1] + path[i]) / 2f, path[i + 1]));
+                    piece.Add(path);
+                    continue;
                 }
+                var segments = Math.Max(path.Count - 1, 0);
+                var from = Math.Max(startIndex - index, 0);
+                var to = Math.Min(startIndex + PieceSegments - index, segments);
+                if (from < to)
+                {
+                    piece.Add(path.GetRange(from, to - from + 1));
+                }
+                index += segments;
             }
-            var shapes = new List<Shape>();
-            for (var startIndex = 0; startIndex < segments.Count; startIndex += PieceSegments)
-            {
-                var shape = UnityEngine.Object.Instantiate(m.shape_prefab).GetComponent<Shape>();
-                shape.settings.shapeType = ShapeType.Path;
-                shape.settings.outlineSize = m.text_linewidth;
-                shape.settings.pathThickness = 0.01f;
-                shape.settings.fillType = FillType.MatchOutlineColor;
-                shape.settings.outlineColor = m.DefaultColor(0);
-                shape.transform.localScale = new Vector3(1f, 1f);
-                shape.settings.pathSegments = segments.GetRange(startIndex, Math.Min(PieceSegments, segments.Count - startIndex)).ToArray();
-                shape.transform.position = Far;
-                shape.ComputeAndApply();
-                shapes.Add(shape);
-            }
-            return shapes;
+            piece.Add(new List<Vector2> { extent });
+            return piece;
         }
 
         // Once every word is queued and every readback is back, reports the totals and redraws the

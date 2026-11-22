@@ -295,6 +295,8 @@ A `solid` word isn't drawn. It's shown with the game's own sprite for its one `s
 
 A word with a stroke list that produces no drawing will use its original sprite if available, or the stock fallback sprite otherwise.
 
+The sprites are all drawn in one pass, in the first frame after the game loads, so that frame takes longer the more sprites there are to draw. The page is redrawn when they are done.
+
 A number word like `5e2` is drawn from its digit's glyph by name, not through its components, and gets a new sprite when its digit's glyph changes.
 
 ## Patches
