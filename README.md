@@ -303,6 +303,8 @@ A number word like `5e2` is drawn from its digit's glyph by name, not through it
 |---|---|
 | `MV.Init` | Prefix: dumps the game's text files when `DumpGameText` is on, then applies content packs to `Global.textfiles` before the game parses them. |
 | `Draw.DrawACToSlot` | Postfix: shows a drawn sprite in the slot, with its material, or puts the game's material back in a slot that showed one. |
+| `Global.Search_Radicial` | Prefix, applied only when the packs changed the word table: finds a word's categories as the game does, with the same results, but without recursing, so a long chain of words built on words can't overflow the game's stack while it loads. |
+| `AlienInfo.GetCharacter` | Prefix, applied only when the packs changed the word table: first draws the glyphs the word's glyph is built from, deepest first and in the game's order, so the game's own drawing goes only a level or two deep instead of the full depth of a chain of words built on words. |
 
 ## Configuration
 

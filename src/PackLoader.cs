@@ -66,6 +66,10 @@ namespace ContentPacks
             result = textfiles.Where(kv => !before.TryGetValue(kv.Key, out var old) || old != kv.Value)
                 .ToDictionary(kv => kv.Key, kv => kv.Value);
             dropped = before.Keys.Where(k => !textfiles.ContainsKey(k)).ToList();
+            if (result.ContainsKey(WordTableMerge.Target))
+            {
+                IterativeInitPatches.Apply();
+            }
         }
 
         // The files the packs added or changed, with their text, and the game's files they

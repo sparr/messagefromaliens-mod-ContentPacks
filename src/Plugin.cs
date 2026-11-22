@@ -21,6 +21,7 @@ namespace ContentPacks
         internal static ConfigEntry<bool> DumpGameText;
         internal static ConfigEntry<bool> LoadContentPacks;
         internal static ConfigEntry<bool> EnforcePatchContext;
+        internal static Harmony Harmony;
 
         private void Awake()
         {
@@ -34,7 +35,8 @@ namespace ContentPacks
             EnforcePatchContext = Config.Bind("Content", "EnforcePatchContext", false,
                 Described("Place each patch hunk only where all its context lines match. When off, a hunk that removes lines is placed by its removed lines alone, and one that only adds lines is placed where the most of its context lines match. Takes effect at the next launch.", "near wordline can same"));
 
-            new Harmony(Guid).PatchAll(typeof(Plugin).Assembly);
+            Harmony = new Harmony(Guid);
+            Harmony.PatchAll(typeof(Plugin).Assembly);
             Log.LogInfo($"{Name} {Version} loaded");
         }
 
