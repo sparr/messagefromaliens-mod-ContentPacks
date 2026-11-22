@@ -490,17 +490,13 @@ namespace ContentPacks
         private const int BrokenSegments = 25;
         private const int PieceSegments = BrokenSegments - 1;
 
-        // Line segments in a glyph's strokes, as Draw.DrawPath1 builds them, leaving out its
-        // width markers: one-point strokes with y -100.
+        // Line segments in a glyph's strokes, as Draw.DrawPath1 builds them. Its width markers,
+        // one-point strokes with y -100, give none.
         private static int CountSegments(List<List<Vector2>> strokes)
         {
             var count = 0;
             foreach (var path in strokes)
             {
-                if (path.Count == 1 && path[0].y == -100f)
-                {
-                    continue;
-                }
                 count += Math.Max(path.Count - 1, 0);
             }
             return count;
