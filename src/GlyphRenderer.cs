@@ -25,7 +25,6 @@ namespace ContentPacks
         // The word table before any pack changed it. Set by PackLoader.
         internal static string OriginalTable;
 
-        private const int Size = 100;
         private const float PixelsPerUnit = 100f;
         private const int RenderLayer = 31;
 
