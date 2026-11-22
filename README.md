@@ -325,6 +325,7 @@ Each setting is tagged with its name in glyphs, and the mod names itself in glyp
 
 - BepInEx 5.4.23.6 or later, `BepInEx_win_x64` build, unzipped into the game folder. Tested with Unity 6000.6.8f1.
 - On Linux under Proton, set the Steam launch options to `WINEDLLOVERRIDES="winhttp=n,b" %command%`.
+- Optional: [Mod Settings](https://github.com/sparr/messagefromaliens-mod-ModSettings), to turn packs on and off in the game.
 - .NET SDK 8 or later to build.
 
 ## Building
