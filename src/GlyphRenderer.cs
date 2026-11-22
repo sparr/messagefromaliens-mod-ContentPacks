@@ -325,7 +325,7 @@ namespace ContentPacks
                         job.Problem = "its strokes give no line segments";
                         return;
                     }
-                    if (count <= MaxPathSegments && count != BrokenSegments)
+                    if (count <= Shape.MaxPathSegments && count != BrokenSegments)
                     {
                         shapes.Add(m.DrawPath1(strokes, Far, 0, -1f, default, true, false));
                     }
@@ -484,8 +484,6 @@ namespace ContentPacks
 
         private static readonly Vector3 Far = new Vector3(1000f, 1000f, 0f);
 
-        // Shapes2D draws a path of at most this many segments.
-        internal static readonly int MaxPathSegments = Shapes2D.Shape.MaxPathSegments;
         // For a path of exactly this many segments, Shapes2D turns on both its 24- and its
         // 32-segment shader variants (Shape.ApplyShaderPropertiesToMaterial), and the 24-segment
         // one draws, leaving out the last segment. Pieces are cut one segment shorter.
