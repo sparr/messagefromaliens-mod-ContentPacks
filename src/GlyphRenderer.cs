@@ -36,11 +36,8 @@ namespace ContentPacks
         private static Material alphaMaterial;
         private static Material spriteMaterial;
         private static bool started;
-        private static int pending;
-        private static int failed;
-        private static bool queued;
 
-        // Called every frame until the game has loaded and the glyphs are queued.
+        // Called every frame until the game has loaded and the glyphs are drawn.
         internal static void Tick()
         {
             if (started)
@@ -127,19 +124,24 @@ namespace ContentPacks
             cam.cullingMask = 1 << RenderLayer;
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = new Color(1f, 1f, 1f, 0f);
+            var failed = 0;
             try
             {
                 foreach (var word in words)
                 {
-                    Render(m, cam, word, IsSolid(after[word]));
+                    if (!Render(m, cam, word, IsSolid(after[word])))
+                    {
+                        failed++;
+                    }
                 }
             }
             finally
             {
                 UnityEngine.Object.Destroy(camObject);
             }
-            queued = true;
-            Finish();
+            // The page may have been drawn before the sprites.
+            Log.Info(failed == 0 ? $"Glyphs: {sprites.Count} drawn" : $"Glyphs: {sprites.Count} drawn, {failed} kept the game's image");
+            Global.manager?.UpdateText();
         }
 
         // As the game reads the struct column in Global.Init: case-sensitive, as written.
@@ -275,27 +277,34 @@ namespace ContentPacks
             return rows;
         }
 
-        // One word being drawn: its pieces' readbacks, and what went wrong if anything did.
-        private sealed class Job
+        // Draws one word and makes its sprite, or logs why it has none. Returns whether it has one.
+        private static bool Render(Draw m, Camera cam, string word, bool solid)
         {
-            public string Word;
-            public byte[] Alpha;
-            public int W, H;
-            public Vector2 Pivot;
-            // Readbacks requested and not yet back, and whether more may still be requested.
-            public int Outstanding;
-            public bool Issuing = true;
-            public string Problem;
-            public Exception Error;
+            var problem = DrawWord(m, cam, word, solid, out var error);
+            if (problem == null)
+            {
+                return true;
+            }
+            var message = $"{Origin(word)}: {problem}, so it keeps the game's image for it";
+            if (error == null)
+            {
+                Log.Warning(message);
+            }
+            else
+            {
+                Log.Error(message);
+                Log.Debug(error.ToString());
+            }
+            return false;
         }
 
-        // Draws one word with the game's glyph drawing code and queues its readback.
-        private static void Render(Draw m, Camera cam, string word, bool solid)
+        // Draws one word with the game's glyph drawing code, reads each piece back as it is
+        // drawn, and makes the word's sprite. Returns what went wrong, or null.
+        private static string DrawWord(Draw m, Camera cam, string word, bool solid, out Exception error)
         {
-            var job = new Job { Word = word };
-            pending++;
+            error = null;
             var shapes = new List<Shape>();
-            RenderTexture unrequested = null;
+            RenderTexture rt = null;
             try
             {
                 if (solid)
@@ -318,8 +327,7 @@ namespace ContentPacks
                     var count = CountSegments(strokes);
                     if (count == 0)
                     {
-                        job.Problem = "its strokes give no line segments";
-                        return;
+                        return "its strokes give no line segments";
                     }
                     if (count <= Shape.MaxPathSegments && count != BrokenSegments)
                     {
@@ -347,18 +355,18 @@ namespace ContentPacks
                 // Every piece has the same quad, so they share the framing.
                 var bounds = shapes[0].GetShapeBounds();
                 var pixels = shapes[0].GetShapePixelSize(PixelsPerUnit);
-                job.W = (int)pixels.x;
-                job.H = (int)pixels.y;
-                job.Pivot = shapes[0].GetPivot();
-                job.Alpha = new byte[job.W * job.H];
+                var w = (int)pixels.x;
+                var h = (int)pixels.y;
+                var pivot = shapes[0].GetPivot();
+                var alpha = new byte[w * h];
                 cam.transform.position = new Vector3(bounds.center.x, bounds.center.y, bounds.center.z - 10f);
                 cam.orthographicSize = bounds.size.y / 2f;
-                cam.aspect = (float)job.W / job.H;
+                cam.aspect = (float)w / h;
 
                 foreach (var shape in shapes)
                 {
                     // A pooled target without a depth buffer: the shapes are flat and drawn alone.
-                    var rt = unrequested = RenderTexture.GetTemporary(job.W, job.H, 0, RenderTextureFormat.ARGB32);
+                    rt = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32);
                     cam.targetTexture = rt;
                     // As Shape.DrawToTexture2D does: draw the shape alone, without blending, so the
                     // target holds its exact alpha.
@@ -368,22 +376,43 @@ namespace ContentPacks
                     cam.Render();
                     shape.gameObject.layer = layer;
                     cam.targetTexture = null;
-                    AsyncGPUReadback.Request(rt, 0, TextureFormat.Alpha8, request => ReadBack(job, rt, request));
-                    unrequested = null;
-                    job.Outstanding++;
+                    try
+                    {
+                        var request = AsyncGPUReadback.Request(rt, 0, TextureFormat.Alpha8);
+                        request.WaitForCompletion();
+                        if (request.hasError)
+                        {
+                            return "reading it back from the GPU failed";
+                        }
+                        // A piece's alpha falls off with distance from its nearest segment, so the
+                        // highest alpha over the pieces is the whole path's.
+                        var data = request.GetData<byte>();
+                        for (var i = 0; i < alpha.Length; i++)
+                        {
+                            if (data[i] > alpha[i]) alpha[i] = data[i];
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        error = e;
+                        return $"reading it back failed: {e.Message}";
+                    }
+                    RenderTexture.ReleaseTemporary(rt);
+                    rt = null;
                 }
+                return MakeSprite(word, alpha, w, h, pivot, out error);
             }
             catch (Exception e)
             {
-                job.Problem = $"drawing it failed: {e.Message}";
-                job.Error = e;
+                error = e;
+                return $"drawing it failed: {e.Message}";
             }
             finally
             {
                 cam.targetTexture = null;
-                if (unrequested != null)
+                if (rt != null)
                 {
-                    RenderTexture.ReleaseTemporary(unrequested);
+                    RenderTexture.ReleaseTemporary(rt);
                 }
                 foreach (var shape in shapes)
                 {
@@ -392,87 +421,31 @@ namespace ContentPacks
                         UnityEngine.Object.DestroyImmediate(shape.gameObject);
                     }
                 }
-                job.Issuing = false;
-                Complete(job);
             }
         }
 
-        // Adds one piece's alpha to its word.
-        private static void ReadBack(Job job, RenderTexture rt, AsyncGPUReadbackRequest request)
+        // Makes a word's sprite from its alpha. Returns what went wrong, or null.
+        private static string MakeSprite(string word, byte[] alpha, int w, int h, Vector2 pivot, out Exception error)
         {
+            error = null;
             try
             {
-                if (request.hasError)
+                var tex = new Texture2D(w, h, TextureFormat.Alpha8, false)
                 {
-                    job.Problem = job.Problem ?? "reading it back from the GPU failed";
-                }
-                else if (job.Problem == null)
-                {
-                    // A piece's alpha falls off with distance from its nearest segment, so the
-                    // highest alpha over the pieces is the whole path's.
-                    var data = request.GetData<byte>();
-                    for (var i = 0; i < job.Alpha.Length; i++)
-                    {
-                        if (data[i] > job.Alpha[i]) job.Alpha[i] = data[i];
-                    }
-                }
+                    filterMode = FilterMode.Bilinear,
+                    wrapMode = TextureWrapMode.Clamp,
+                    name = "ContentPacks glyph",
+                };
+                tex.LoadRawTextureData(alpha);
+                tex.Apply(false, true);
+                sprites[word] = Sprite.Create(tex, new Rect(0, 0, w, h), pivot, PixelsPerUnit);
+                return null;
             }
             catch (Exception e)
             {
-                job.Problem = job.Problem ?? $"reading it back failed: {e.Message}";
-                job.Error = job.Error ?? e;
+                error = e;
+                return $"making its sprite failed: {e.Message}";
             }
-            finally
-            {
-                RenderTexture.ReleaseTemporary(rt);
-                job.Outstanding--;
-                Complete(job);
-            }
-        }
-
-        // Once a word's readbacks are all back, makes its sprite, or logs why it has none.
-        private static void Complete(Job job)
-        {
-            if (job.Issuing || job.Outstanding > 0)
-            {
-                return;
-            }
-            if (job.Problem == null)
-            {
-                try
-                {
-                    var tex = new Texture2D(job.W, job.H, TextureFormat.Alpha8, false)
-                    {
-                        filterMode = FilterMode.Bilinear,
-                        wrapMode = TextureWrapMode.Clamp,
-                        name = "ContentPacks glyph",
-                    };
-                    tex.LoadRawTextureData(job.Alpha);
-                    tex.Apply(false, true);
-                    sprites[job.Word] = Sprite.Create(tex, new Rect(0, 0, job.W, job.H), job.Pivot, PixelsPerUnit);
-                }
-                catch (Exception e)
-                {
-                    job.Problem = $"making its sprite failed: {e.Message}";
-                    job.Error = e;
-                }
-            }
-            if (job.Problem != null)
-            {
-                failed++;
-                var message = $"{Origin(job.Word)}: {job.Problem}, so it keeps the game's image for it";
-                if (job.Error == null)
-                {
-                    Log.Warning(message);
-                }
-                else
-                {
-                    Log.Error(message);
-                    Log.Debug(job.Error.ToString());
-                }
-            }
-            pending--;
-            Finish();
         }
 
         // Where a word came from, for log messages, without naming it.
@@ -549,18 +522,6 @@ namespace ContentPacks
             }
             piece.Add(new List<Vector2> { extent });
             return piece;
-        }
-
-        // Once every word is queued and every readback is back, reports the totals and redraws the
-        // page in case it was drawn before the sprites.
-        private static void Finish()
-        {
-            if (!queued || pending > 0)
-            {
-                return;
-            }
-            Log.Info(failed == 0 ? $"Glyphs: {sprites.Count} drawn" : $"Glyphs: {sprites.Count} drawn, {failed} kept the game's image");
-            Global.manager?.UpdateText();
         }
 
         // Shows a drawn sprite in a slot the game just filled, or puts back the game's material
