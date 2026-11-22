@@ -15,7 +15,7 @@ namespace ContentPacks
     {
         public const string Guid = "sparr.messagefromaliens.contentpacks";
         public const string Name = "Content Packs";
-        public const string Version = "0.1.0";
+        public const string Version = "0.2.0";
 
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> DumpGameText;
