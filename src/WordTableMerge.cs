@@ -407,7 +407,7 @@ namespace ContentPacks
                     {
                         continue;
                     }
-                    var problem = row.Removed ? RemovalProblem(row) : RowProblem(row);
+                    var problem = row.Removed ? RemovalProblem(row) ?? GapReason(row) : RowProblem(row);
                     if (problem == null)
                     {
                         continue;
@@ -907,9 +907,9 @@ namespace ContentPacks
         // then gets every category its part has. So a one-part category word whose part, not a
         // category word itself, has that word among its categories stops the game. The part gets
         // it from a basic glyph whose redirect names the word, or from the game's one special
-        // case for an up-down compound on the hand word. Holds the category word, and when it is
-        // the game's own row, every row on the way to the source. Built when first needed by each
-        // Validate, and again after an undo of a row it looked up.
+        // case for an up-down compound on the hand word. Holds the rows to blame, as CategoryLoops
+        // picks them. Built when first needed by each Validate, and again after an undo of a row
+        // it looked up.
         private HashSet<Row> categoryLoops;
         // The words looked up while building categoryLoops.
         private HashSet<string> loopWords;
@@ -956,14 +956,35 @@ namespace ContentPacks
                     continue;
                 }
                 var memo = new Dictionary<Row, bool>();
-                if (HasCategory(part, row.Word, memo))
+                if (!HasCategory(part, row.Word, memo))
                 {
-                    // The category word's own change is blamed first, when it has one.
+                    continue;
+                }
+                // The category word's own change is blamed when it alters the categories the
+                // word gives, and otherwise those of the rows on the way to the source that do.
+                // Failing both, as when an earlier change is to blame, the rows whose category
+                // cells differ from the game's are, and failing those, the category word and,
+                // when it is the game's own row, every row on the way.
+                if (ChangesCategories(row))
+                {
                     categoryLoops.Add(row);
-                    if (IsStock(row))
-                    {
-                        categoryLoops.UnionWith(memo.Where(kv => kv.Value).Select(kv => kv.Key));
-                    }
+                    continue;
+                }
+                var path = memo.Where(kv => kv.Value).Select(kv => kv.Key).ToList();
+                var culprits = path.Where(ChangesCategories).ToList();
+                if (culprits.Count == 0)
+                {
+                    culprits = path.Where(r => !IsStock(r) && CategoryCells(r.Cells, r.Removed) != CategoryCells(r.Stock, r.Stock == null)).ToList();
+                }
+                if (culprits.Count > 0)
+                {
+                    categoryLoops.UnionWith(culprits);
+                    continue;
+                }
+                categoryLoops.Add(row);
+                if (IsStock(row))
+                {
+                    categoryLoops.UnionWith(path);
                 }
             }
             return categoryLoops;
@@ -1083,8 +1104,8 @@ namespace ContentPacks
         // category with no word, or null. Global.Init files each word under categories the way
         // CategoryFinder works it out. The dictionary page fails to draw while a word with none
         // is shown, and the dictionary page and note editor fail to open while a category in
-        // Global.category_list is empty. A changed row is blamed for its own loss; a loss in one
-        // of the game's own rows blames the changed rows its categories come from.
+        // Global.category_list is empty. A row whose latest change alters the categories it gives
+        // is blamed for its own loss; a loss in any other row blames the rows UpdateBlamed finds.
         private string GapReason(Row row)
         {
             if (Global.category_list == null)
@@ -1092,13 +1113,13 @@ namespace ContentPacks
                 return null;
             }
             gaps = gaps ?? BuildGaps();
-            var changed = !IsStock(row);
-            if ((changed && gaps.NoCategory.Contains(row)) || gaps.BlamedForNoCategory.Contains(row))
+            var own = ChangesCategories(row);
+            if ((own && gaps.NoCategory.Contains(row)) || gaps.BlamedForNoCategory.Contains(row))
             {
                 return NoCategoryReason;
             }
-            if ((changed && gaps.Empty.Contains(row.Word) && !row.Removed && index.TryGetValue(row.Word, out var own) && own == row)
-                || (changed && gaps.LostBy.TryGetValue(row, out var lost) && lost.Overlaps(gaps.Empty))
+            if ((own && gaps.Empty.Contains(row.Word) && !row.Removed && index.TryGetValue(row.Word, out var held) && held == row)
+                || (own && gaps.LostBy.TryGetValue(row, out var lost) && lost.Overlaps(gaps.Empty))
                 || gaps.BlamedForEmpty.Contains(row))
             {
                 return EmptyReason;
@@ -1123,9 +1144,12 @@ namespace ContentPacks
             public bool Exact;
             public readonly Dictionary<Row, List<string>> Now = new Dictionary<Row, List<string>>();
             // Live words with no category, where the game's own table gives them one or doesn't
-            // have them, and those of them that are the game's own rows.
+            // have them, and those of them whose latest changes don't alter the categories they
+            // give, which other rows are blamed for.
             public readonly HashSet<Row> NoCategory = new HashSet<Row>();
-            public readonly HashSet<Row> NoCategoryStock = new HashSet<Row>();
+            public readonly HashSet<Row> NoCategoryPassive = new HashSet<Row>();
+            // The game's own words that are removed.
+            public readonly HashSet<Row> RemovedStock = new HashSet<Row>();
             // How many live words have each category among their first 10.
             public readonly Dictionary<string, int> Filled = new Dictionary<string, int>();
             // The categories each word had among its first 10 in the game's table and now lacks,
@@ -1134,7 +1158,7 @@ namespace ContentPacks
             public readonly Dictionary<string, HashSet<Row>> Lost = new Dictionary<string, HashSet<Row>>();
             // Categories in Global.category_list that have words in the game's table and none now.
             public readonly HashSet<string> Empty = new HashSet<string>();
-            // Changed rows that the game's own rows' losses blame.
+            // Changed rows to blame for the losses.
             public HashSet<Row> BlamedForNoCategory = new HashSet<Row>();
             public HashSet<Row> BlamedForEmpty = new HashSet<Row>();
         }
@@ -1152,9 +1176,16 @@ namespace ContentPacks
                 Finder = new CategoryFinder(w => index.TryGetValue(w, out var r) && !r.Removed ? r.Cells : null, cols),
                 Exact = CycleRows().Count == 0,
             };
-            foreach (var row in index.Values.Where(r => !r.Removed).ToList())
+            foreach (var row in index.Values.ToList())
             {
-                SetCategories(g, row, g.Finder.Of(row.Word), null);
+                if (!row.Removed)
+                {
+                    SetCategories(g, row, g.Finder.Of(row.Word), null);
+                }
+                else if (row.Stock != null)
+                {
+                    g.RemovedStock.Add(row);
+                }
             }
             foreach (var category in Global.category_list)
             {
@@ -1204,13 +1235,21 @@ namespace ContentPacks
             {
                 g.NoCategory.Remove(row);
             }
-            if (none && IsStock(row))
+            if (none && !ChangesCategories(row))
             {
-                g.NoCategoryStock.Add(row);
+                g.NoCategoryPassive.Add(row);
             }
             else
             {
-                g.NoCategoryStock.Remove(row);
+                g.NoCategoryPassive.Remove(row);
+            }
+            if (now == null && row.Stock != null)
+            {
+                g.RemovedStock.Add(row);
+            }
+            else
+            {
+                g.RemovedStock.Remove(row);
             }
             if (g.LostBy.TryGetValue(row, out var lostBefore))
             {
@@ -1306,18 +1345,42 @@ namespace ContentPacks
             UpdateBlamed(gaps, recheck);
         }
 
-        // Finds the changed rows that the game's own rows' losses blame.
+        // Finds the changed rows to blame for the losses in rows whose own latest changes aren't
+        // to blame: the game's own rows, and rows changed in a way that gives the same
+        // categories. A category with no words that blames no row that way blames the removals of
+        // words that had it.
         private void UpdateBlamed(Gaps g, Action<Row> recheck)
         {
-            var noCategory = g.NoCategoryStock.ToList();
-            var empty = g.Empty.SelectMany(c => g.Lost.TryGetValue(c, out var lost) ? lost.Where(IsStock) : Enumerable.Empty<Row>()).ToList();
-            if (noCategory.Count == 0 && empty.Count == 0 && g.BlamedForNoCategory.Count == 0 && g.BlamedForEmpty.Count == 0)
+            if (g.NoCategoryPassive.Count == 0 && g.Empty.Count == 0 && g.BlamedForNoCategory.Count == 0 && g.BlamedForEmpty.Count == 0)
             {
                 return;
             }
             var old = g.BlamedForNoCategory.Concat(g.BlamedForEmpty).ToList();
-            g.BlamedForNoCategory = new HashSet<Row>(noCategory.SelectMany(Sources).Where(r => !IsStock(r)));
-            g.BlamedForEmpty = new HashSet<Row>(empty.SelectMany(Sources).Where(r => !IsStock(r)));
+            g.BlamedForNoCategory = new HashSet<Row>(g.NoCategoryPassive.SelectMany(Culprits));
+            g.BlamedForEmpty = new HashSet<Row>();
+            foreach (var c in g.Empty)
+            {
+                var losers = g.Lost.TryGetValue(c, out var lost) ? lost.ToList() : new List<Row>();
+                var own = index.TryGetValue(c, out var r) && !r.Removed ? r : null;
+                var blamed = losers.Where(l => !ChangesCategories(l)).SelectMany(Culprits).ToList();
+                if (blamed.Count > 0 || losers.Any(ChangesCategories) || (own != null && ChangesCategories(own)))
+                {
+                    g.BlamedForEmpty.UnionWith(blamed);
+                    continue;
+                }
+                // Otherwise the removals of words that had it.
+                blamed = g.RemovedStock.Where(x => ChangesCategories(x) && stockCategories[x.Word].Take(10).Contains(c)).ToList();
+                if (blamed.Count == 0)
+                {
+                    // Otherwise every changed row that could have emptied it, as before.
+                    blamed = losers.SelectMany(Sources).Where(x => !IsStock(x)).ToList();
+                    if (own != null && !IsStock(own))
+                    {
+                        blamed.Add(own);
+                    }
+                }
+                g.BlamedForEmpty.UnionWith(blamed);
+            }
             if (recheck != null)
             {
                 foreach (var r in old.Concat(g.BlamedForNoCategory).Concat(g.BlamedForEmpty))
@@ -1327,9 +1390,47 @@ namespace ContentPacks
             }
         }
 
+        // The changed rows to blame for a loss in a row whose own latest change isn't to blame:
+        // those its categories come from whose latest changes alter the categories they give. A
+        // change to strokes or a meaning, say, is kept. When there are none, an earlier change
+        // must be to blame, so the rows whose category cells differ from the game's are blamed,
+        // and failing that, every changed row the categories come from.
+        private List<Row> Culprits(Row loser)
+        {
+            var changed = Sources(loser).Where(r => !IsStock(r)).ToList();
+            var culprits = changed.Where(ChangesCategories).ToList();
+            if (culprits.Count == 0)
+            {
+                culprits = changed.Where(r => CategoryCells(r.Cells, r.Removed) != CategoryCells(r.Stock, r.Stock == null)).ToList();
+            }
+            return culprits.Count > 0 ? culprits : changed;
+        }
+
+        // Whether undoing a row's latest change would alter the categories it gives itself and
+        // the rows built on it.
+        private bool ChangesCategories(Row r) =>
+            !IsStock(r) && r.Changes.Count > 0 && CategoryCells(r.Cells, r.Removed) != CategoryCells(r.Changes.Peek().Cells, r.Changes.Peek().Removed);
+
+        // The cells a row's categories, and those it gives the rows built on it, are worked out
+        // from, joined, or null for no row: its structure code, the components the code builds
+        // it from, its redirect, its rename, and its word types.
+        private string CategoryCells(string[] cells, bool removed)
+        {
+            if (removed || cells == null)
+            {
+                return null;
+            }
+            var code = cells[cols.StructCol];
+            var kind = KindOf(code);
+            return string.Join(",", code,
+                kind == Kind.OnePart || kind == Kind.TwoParts ? cells[cols.Part1Col] : "",
+                kind == Kind.TwoParts ? cells[cols.Part2Col] : "",
+                cells[cols.RedirectCol], cells[cols.RenameCol], cells[cols.WordTypeCol]);
+        }
+
         // The rows a row's categories come from, itself included, following its parts, a
-        // number's digit, and a basic glyph's redirect. The word of each category it has is
-        // among them, and can drop that category.
+        // number's digit, and a basic glyph's redirect, and the removed rows these name. The word
+        // of each category it has is among them, and can drop that category.
         private IEnumerable<Row> Sources(Row start)
         {
             var seen = new HashSet<Row>();
@@ -1366,7 +1467,16 @@ namespace ContentPacks
                 }
                 foreach (var name in names)
                 {
-                    if (index.TryGetValue(name, out var next) && !next.Removed)
+                    if (!index.TryGetValue(name, out var next))
+                    {
+                        continue;
+                    }
+                    if (next.Removed)
+                    {
+                        // Its removal can drop the categories it gave.
+                        seen.Add(next);
+                    }
+                    else
                     {
                         stack.Push(next);
                     }
