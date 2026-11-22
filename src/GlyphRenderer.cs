@@ -451,7 +451,6 @@ namespace ContentPacks
                     tex.LoadRawTextureData(job.Alpha);
                     tex.Apply(false, true);
                     sprites[job.Word] = Sprite.Create(tex, new Rect(0, 0, job.W, job.H), job.Pivot, PixelsPerUnit);
-                    Drawn?.Invoke(job.Word, job.Alpha);
                 }
                 catch (Exception e)
                 {
@@ -482,9 +481,6 @@ namespace ContentPacks
             WordTableMerge.Origins.TryGetValue(word, out var origin)
                 ? origin
                 : "Glyphs: a word built from a changed glyph, or changed by a replacement or patch";
-
-        // Called with each drawn glyph's alpha, bottom row first. For tests.
-        internal static event Action<string, byte[]> Drawn;
 
         private static readonly Vector3 Far = new Vector3(1000f, 1000f, 0f);
 
