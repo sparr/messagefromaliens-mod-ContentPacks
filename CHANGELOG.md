@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## [0.2.0](https://github.com/sparr/messagefromaliens-mod-ContentPacks/releases/tag/v0.2.0) - 2026-11-22
+## [0.2.0](https://github.com/sparr/messagefromaliens-mod-ContentPacks/releases/tag/v0.2.0) - 2026-11-23
 
 - Pack text, word table rows, and glyph strokes are checked as the game reads them, accepting what the game accepts and refusing what would break it.
 - Text patches are placed more reliably, each hunk within the page it changes.
